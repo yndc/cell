@@ -1,57 +1,58 @@
 # Cell
 
-A high-performance, cache-friendly C++ memory layer designed specifically for **Data-Oriented** applications such as **Entity Component Systems (ECS)**.
+A high-performance, cache-friendly C++ memory library for **data-oriented applications**.
 
-## Key Features
+## Features
 
-* **Configurable Uniform Cells:** Every memory unit is a fixed-size "Cell" (default 16KB, power-of-two). Cells are naturally aligned to their size, eliminating external fragmentation.
-* **Lock-Free Thread Local Storage (TLS):** Each worker thread maintains a private cache of hot Cells to prevent mutex contention.
-* **Dual-State Virtual Memory:** Reserves massive address space (GBs) and only commits physical RAM in Cell-sized or Large Page (2MB) increments.
-* **Integrated Tagging:** Every Cell is tagged by subsystem for real-time memory profiling.
+### Multi-Layer Allocation
 
-## Architecture
+| Layer | Size Range | Strategy |
+|-------|------------|----------|
+| 1 - Cell | 16KB | TLS → Global Pool → OS |
+| 2 - Sub-Cell | 16B - 8KB | Segregated size classes (10 bins) |
+| 3 - Buddy | 32KB - 2MB | Power-of-2 splitting/coalescing |
+| 4 - Large | >2MB | Direct OS (with huge page support) |
 
-1. **Backend:** Direct syscalls to `VirtualAlloc` (Win) or `mmap` (Linux).
-2. **Context (Class):** An RAII object representing a memory environment. Ownership of the virtual address range is tied to the object's lifetime.
-3. **Global Pool:** A per-context thread-safe pool of committed but unused Cells.
-4. **TLS Cache:** A per-thread cache that stores a small number of Cells for lock-free access within a context.
+### Performance Optimizations
 
-### Lifecycle (RAII)
+- **Lock-free TLS caches** for cells and hot sub-cell sizes (16B-128B)
+- **Batch refill** from global pools to amortize lock costs
+- **Memory decommit** API for long-running applications
 
-```cpp
-Cell::Context ctx(config);
-```
+### High-Level Abstractions
 
-* Constructor initializes the memory environment and reserves the address range.
+- `Arena` — Linear/bump allocator with bulk reset
+- `Pool<T>` — Typed object pool with construct/destruct
+- `ArenaScope` — RAII guard for automatic arena reset
 
-```cpp
-// Context is destroyed when it goes out of scope
-```
+### Debug Features
 
-* Destructor immediately releases all virtual and physical memory.
+- Magic numbers for corruption detection
+- Generation counters for stale reference detection
+- Memory poisoning on free
+- Optional memory statistics (`CELL_ENABLE_STATS`)
 
-### Methods
-
-```cpp
-CellData* ctx.alloc(uint8_t tag = 0);
-```
-
-* Retrieves an aligned `CellData` from the instance's pool.
-* Complexity: O(1) (TLS) or O(1) (Global with lock).
+## Quick Start
 
 ```cpp
-void ctx.free(CellData* cell);
+#include <cell/context.h>
+
+int main() {
+    Cell::Context ctx;
+
+    // Sub-cell allocation (auto size-routed)
+    int* data = ctx.alloc<int>();
+    ctx.free_bytes(data);
+
+    // Arena for temporary allocations
+    Cell::Arena arena(ctx);
+    void* temp = arena.alloc(1024);
+    arena.reset();  // Bulk free
+
+    // Memory management for long-running apps
+    ctx.decommit_unused();  // Release unused physical memory
+}
 ```
-
-* Returns the `CellData` to the instance's local or global pool.
-
-### Metadata Access
-
-```cpp
-CellHeader* Cell::get_header(void* ptr);
-```
-
-* Performs a constant-time alignment mask to locate the `CellHeader` for any pointer within a Cell.
 
 ## Building
 
