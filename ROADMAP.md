@@ -8,6 +8,18 @@
 - [ ] Stack trace capture on allocation
 - [ ] Leak detection report
 
+### API Enhancements
+
+- [ ] Aligned allocation API (`alloc_aligned`)
+- [ ] Realloc support (`realloc_bytes`)
+- [ ] STL-compatible allocator wrapper
+
+### Production Hardening
+
+- [ ] Thread safety audit
+- [ ] Memory budget limits
+- [ ] Allocation callbacks for instrumentation
+
 ---
 
 ## Version Milestones
