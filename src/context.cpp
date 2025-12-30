@@ -31,7 +31,7 @@ namespace Cell {
         }
     }
 
-    CellData *Context::alloc(MemoryTag tag) {
+    CellData *Context::alloc(uint8_t tag) {
         // TODO: Implement pool/TLS allocation
         (void)tag;
         return nullptr;

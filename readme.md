@@ -33,7 +33,7 @@ Cell::Context ctx(config);
 ### Methods
 
 ```cpp
-CellData* ctx.alloc(MemoryTag tag);
+CellData* ctx.alloc(uint8_t tag = 0);
 ```
 
 * Retrieves an aligned `CellData` from the instance's pool.

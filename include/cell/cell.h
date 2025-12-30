@@ -7,21 +7,12 @@
 namespace Cell {
 
     /**
-     * @brief Tags for memory profiling and subsystem identification.
-     */
-    enum class MemoryTag : uint8_t {
-        Unknown = 0, /**< Untagged or unknown memory. */
-        General,     /**< General purpose allocation. */
-        // Add application-specific tags here
-    };
-
-    /**
      * @brief Header stored at the beginning of each Cell.
      *
      * Contains metadata for profiling and management.
      */
     struct CellHeader {
-        MemoryTag tag;       /**< Memory subsystem tag. */
+        uint8_t tag;         /**< Application-defined memory tag for profiling. */
         uint8_t reserved[7]; /**< Reserved for future use (alignment, generation counters, etc.) */
     };
 

@@ -31,10 +31,10 @@ namespace Cell {
 
         /**
          * @brief Allocates a Cell from this context's pool.
-         * @param tag Metadata tag for profiling.
+         * @param tag Application-defined tag for profiling (default: 0).
          * @return Pointer to an aligned CellData, or nullptr on failure.
          */
-        CellData *alloc(MemoryTag tag = MemoryTag::General);
+        CellData *alloc(uint8_t tag = 0);
 
         /**
          * @brief Returns a Cell to this context's pool.
