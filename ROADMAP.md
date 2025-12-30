@@ -14,11 +14,15 @@ Layer 2 (Sub-Cell Allocator) is complete:
 - Warm cell reserves per bin
 - Debug memory poisoning
 
-Layer 3 (Arena Allocator) is complete:
-- Linear/bump allocation
-- Cell chaining with auto-growth
-- Marker-based nested scopes
-- reset() and release() lifetime management
+Layer 3 (High-Level Abstractions) is complete:
+- Arena allocator with linear/bump allocation
+- Pool\<T\> typed object pool
+- ArenaScope RAII guard
+
+Large Allocations complete:
+- Buddy allocator for 32KB-2MB (power-of-2 splitting/coalescing)
+- Direct OS allocation for >2MB (with optional huge pages)
+- Automatic size routing in alloc_bytes()
 
 ---
 
@@ -32,27 +36,6 @@ Layer 3 (Arena Allocator) is complete:
 - [ ] TLS cache for bins 0-3 (16B, 32B, 64B, 128B) — most common sizes
 - [ ] Batch refill from global bin
 - [ ] Flush on thread exit
-
----
-
-### Layer 3: Additional Abstractions
-
-#### Pool<T> (Typed Object Pool)
-- [ ] Type-safe wrapper over sub-cell allocator
-- [ ] Batch allocation support
-- [ ] Optional constructor/destructor calls
-
-#### Stack Allocator
-- [ ] Scope-based temporary allocations
-- [ ] Marker-based free (`free_to_marker()`)
-
----
-
-### Large Allocations
-
-- [ ] Multi-cell allocations (16KB - 2MB)
-- [ ] Direct OS allocation path (2MB+)
-- [ ] Large allocation registry for tracking
 
 ---
 
@@ -78,7 +61,7 @@ Layer 3 (Arena Allocator) is complete:
 
 ### Platform Optimizations
 
-- [ ] Large page support (`MAP_HUGETLB` / `MEM_LARGE_PAGES`)
+- [x] Large page support (`MAP_HUGETLB` / `MEM_LARGE_PAGES`) for >2MB allocations
 - [ ] Memory decommit for long-running games
 - [ ] NUMA-aware allocation (future)
 
@@ -91,8 +74,7 @@ Layer 3 (Arena Allocator) is complete:
 | 0.1.0   | Cell allocator (Layer 1) ✓ |
 | 0.2.0   | Sub-cell allocator (Layer 2) ✓ |
 | 0.3.0   | Arena allocator ✓ |
-| **0.4.0** | **Pool\<T\> + ArenaScope ✓** ← Current |
-| 0.5.0   | Memory stats & profiling |
-| 0.6.0   | Large allocations |
+| 0.4.0   | Pool\<T\> + ArenaScope ✓ |
+| **0.5.0** | **Buddy + Large allocations ✓** ← Current |
+| 0.6.0   | Memory stats & profiling |
 | 1.0.0   | Production-ready with all debug features |
-

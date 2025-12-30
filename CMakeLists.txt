@@ -9,6 +9,8 @@ add_library(cell STATIC
     src/allocator.cpp
     src/context.cpp
     src/arena.cpp
+    src/buddy.cpp
+    src/large.cpp
 )
 
 target_include_directories(cell PUBLIC
@@ -49,4 +51,9 @@ if(CELL_BUILD_TESTS)
     add_executable(test_pool tests/test_pool.cpp)
     target_link_libraries(test_pool PRIVATE cell)
     add_test(NAME test_pool COMMAND test_pool)
+
+    # Buddy and large allocation test
+    add_executable(test_buddy tests/test_buddy.cpp)
+    target_link_libraries(test_buddy PRIVATE cell)
+    add_test(NAME test_buddy COMMAND test_buddy)
 endif()

@@ -1,8 +1,10 @@
 #pragma once
 
 #include "allocator.h"
+#include "buddy.h"
 #include "cell.h"
 #include "config.h"
+#include "large.h"
 #include "sub_cell.h"
 
 #include <memory>
@@ -41,8 +43,11 @@ namespace Cell {
         /**
          * @brief Allocates memory of the specified size.
          *
-         * Uses sub-cell allocation for sizes <= kMaxSubCellSize,
-         * or full-cell allocation for larger sizes.
+         * Routing by size:
+         * - <= kMaxSubCellSize (8KB): Sub-cell bins
+         * - <= kCellSize (16KB): Full cell
+         * - <= 2MB: Buddy allocator
+         * - > 2MB: Direct OS allocation
          *
          * @param size Size in bytes to allocate.
          * @param tag Application-defined tag for profiling (default: 0).
@@ -80,6 +85,31 @@ namespace Cell {
         template <typename T> [[nodiscard]] T *alloc_array(size_t count, uint8_t tag = 0) {
             return static_cast<T *>(alloc_bytes(sizeof(T) * count, tag, alignof(T)));
         }
+
+        // =====================================================================
+        // Large Allocation API (explicit, for allocations > 16KB)
+        // =====================================================================
+
+        /**
+         * @brief Explicitly allocates a large block (uses buddy or direct OS).
+         *
+         * Routing:
+         * - <= 2MB: Buddy allocator
+         * - > 2MB: Direct OS with optional huge pages
+         *
+         * @param size Size in bytes.
+         * @param tag Application-defined tag for profiling.
+         * @param try_huge_pages For >2MB allocations, try to use huge pages.
+         * @return Pointer to allocated memory, or nullptr on failure.
+         */
+        [[nodiscard]] void *alloc_large(size_t size, uint8_t tag = 0, bool try_huge_pages = true);
+
+        /**
+         * @brief Frees a large allocation.
+         *
+         * @param ptr Pointer returned by alloc_large().
+         */
+        void free_large(void *ptr);
 
         // =====================================================================
         // Cell-Level Allocation API (for 16KB blocks or internal use)
@@ -136,6 +166,14 @@ namespace Cell {
 
         SizeBin m_bins[kNumSizeBins];         ///< Size class bins.
         std::mutex m_bin_locks[kNumSizeBins]; ///< Per-bin locks.
+
+        // Buddy allocator for 32KB - 2MB
+        void *m_buddy_base = nullptr;     ///< Start of buddy region.
+        size_t m_buddy_reserved_size = 0; ///< Buddy reserved size.
+        std::unique_ptr<BuddyAllocator> m_buddy;
+
+        // Large allocation registry for > 2MB
+        LargeAllocRegistry m_large_allocs;
     };
 
 }

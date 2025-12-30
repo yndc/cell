@@ -132,7 +132,7 @@ TEST(MultiThreadedCell) {
 // Test 5: Leak detection - verify cells are properly returned to pool
 TEST(CellLeakDetection) {
     Cell::Config config;
-    config.reserve_size = 8 * 1024 * 1024; // 8MB - small to detect leaks faster
+    config.reserve_size = 16 * 1024 * 1024; // 16MB - half goes to cells, half to buddy
 
     Cell::Context ctx(config);
 

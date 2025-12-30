@@ -13,17 +13,45 @@
 namespace Cell {
 
     Context::Context(const Config &config) : m_reserved_size(config.reserve_size) {
+        // Split reserved space: half for cells, half for buddy
+        // Both need to be reasonably sized for their use cases
+        size_t cell_reserve = m_reserved_size / 2;
+        size_t buddy_reserve = m_reserved_size / 2;
+
+        // Round down to superblock alignment for cell region
+        cell_reserve = (cell_reserve / kSuperblockSize) * kSuperblockSize;
+        // Round down to 2MB alignment for buddy region
+        buddy_reserve =
+            (buddy_reserve / BuddyAllocator::kMaxBlockSize) * BuddyAllocator::kMaxBlockSize;
+
 #if defined(_WIN32)
-        m_base = VirtualAlloc(nullptr, m_reserved_size, MEM_RESERVE, PAGE_NOACCESS);
+        m_base = VirtualAlloc(nullptr, cell_reserve, MEM_RESERVE, PAGE_NOACCESS);
+        if (m_base) {
+            m_buddy_base = VirtualAlloc(nullptr, buddy_reserve, MEM_RESERVE, PAGE_NOACCESS);
+        }
 #else
-        m_base = mmap(nullptr, m_reserved_size, PROT_NONE,
-                      MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+        m_base = mmap(nullptr, cell_reserve, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE,
+                      -1, 0);
         if (m_base == MAP_FAILED) {
             m_base = nullptr;
         }
-#endif
         if (m_base) {
-            m_allocator = std::make_unique<Allocator>(m_base, m_reserved_size);
+            m_buddy_base = mmap(nullptr, buddy_reserve, PROT_READ | PROT_WRITE,
+                                MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+            if (m_buddy_base == MAP_FAILED) {
+                m_buddy_base = nullptr;
+            }
+        }
+#endif
+
+        if (m_base) {
+            m_reserved_size = cell_reserve;
+            m_allocator = std::make_unique<Allocator>(m_base, cell_reserve);
+        }
+
+        if (m_buddy_base) {
+            m_buddy_reserved_size = buddy_reserve;
+            m_buddy = std::make_unique<BuddyAllocator>(m_buddy_base, buddy_reserve);
         }
 
         // Initialize bins (already zero-initialized, but be explicit)
@@ -36,11 +64,22 @@ namespace Cell {
     }
 
     Context::~Context() {
+        // Buddy allocator destructor handles its cleanup
+        m_buddy.reset();
+        m_allocator.reset();
+
         if (m_base) {
 #if defined(_WIN32)
             VirtualFree(m_base, 0, MEM_RELEASE);
 #else
             munmap(m_base, m_reserved_size);
+#endif
+        }
+        if (m_buddy_base) {
+#if defined(_WIN32)
+            VirtualFree(m_buddy_base, 0, MEM_RELEASE);
+#else
+            munmap(m_buddy_base, m_buddy_reserved_size);
 #endif
         }
     }
@@ -50,24 +89,43 @@ namespace Cell {
     // =========================================================================
 
     void *Context::alloc_bytes(size_t size, uint8_t tag, size_t alignment) {
-        if (!m_allocator || size == 0) {
+        if (size == 0) {
             return nullptr;
         }
 
-        // Determine size class
-        uint8_t bin_index = get_size_class(size, alignment);
+        // Size routing:
+        // <= 8KB: sub-cell bins
+        // <= 16KB (usable cell space): full cell
+        // <= 2MB: buddy allocator
+        // > 2MB: direct OS (large allocation)
 
-        if (bin_index == kFullCellMarker) {
-            // Too large for sub-cell, use full cell allocation
-            CellData *cell = alloc_cell(tag);
-            if (cell) {
-                cell->header.size_class = kFullCellMarker;
+        size_t usable_cell_size = kCellSize - kBlockStartOffset;
+
+        if (size <= kMaxSubCellSize) {
+            // Sub-cell allocation
+            if (!m_allocator)
+                return nullptr;
+            uint8_t bin_index = get_size_class(size, alignment);
+            if (bin_index == kFullCellMarker) {
+                // Rare edge case: alignment pushes us to full cell
+                CellData *cell = alloc_cell(tag);
+                if (cell)
+                    cell->header.size_class = kFullCellMarker;
+                return cell;
             }
+            return alloc_from_bin(bin_index, tag);
+        } else if (size <= usable_cell_size) {
+            // Full cell allocation (up to ~16KB)
+            if (!m_allocator)
+                return nullptr;
+            CellData *cell = alloc_cell(tag);
+            if (cell)
+                cell->header.size_class = kFullCellMarker;
             return cell;
+        } else {
+            // Large allocation (buddy or direct OS)
+            return alloc_large(size, tag);
         }
-
-        // Allocate from size class bin
-        return alloc_from_bin(bin_index, tag);
     }
 
     void Context::free_bytes(void *ptr) {
@@ -75,7 +133,18 @@ namespace Cell {
             return;
         }
 
-        // Get header to determine allocation type
+        // Check which allocator owns this pointer
+        if (m_buddy && m_buddy->owns(ptr)) {
+            m_buddy->free(ptr);
+            return;
+        }
+
+        if (m_large_allocs.owns(ptr)) {
+            m_large_allocs.free(ptr);
+            return;
+        }
+
+        // Must be cell/sub-cell allocation
         CellHeader *header = get_header(ptr);
 
         if (header->size_class == kFullCellMarker) {
@@ -84,6 +153,38 @@ namespace Cell {
         } else {
             // Sub-cell allocation
             free_to_bin(ptr, header);
+        }
+    }
+
+    // =========================================================================
+    // Large Allocation API
+    // =========================================================================
+
+    void *Context::alloc_large(size_t size, uint8_t tag, bool try_huge_pages) {
+        if (size == 0) {
+            return nullptr;
+        }
+
+        // Route: <= 2MB to buddy, > 2MB to direct OS
+        if (size <= BuddyAllocator::kMaxBlockSize) {
+            if (m_buddy) {
+                return m_buddy->alloc(size);
+            }
+            // Fallback to large alloc if buddy not initialized
+        }
+
+        // Direct OS allocation for > 2MB
+        return m_large_allocs.alloc(size, tag, try_huge_pages);
+    }
+
+    void Context::free_large(void *ptr) {
+        if (!ptr)
+            return;
+
+        if (m_buddy && m_buddy->owns(ptr)) {
+            m_buddy->free(ptr);
+        } else {
+            m_large_allocs.free(ptr);
         }
     }
 
