@@ -18,6 +18,13 @@ target_include_directories(cell PUBLIC
     $<INSTALL_INTERFACE:include>
 )
 
+# Memory statistics (compile-time optional)
+option(CELL_ENABLE_STATS "Enable memory statistics tracking" OFF)
+if(CELL_ENABLE_STATS)
+    target_compile_definitions(cell PUBLIC CELL_ENABLE_STATS)
+    message(STATUS "Cell: Memory statistics enabled")
+endif()
+
 # Tests (optional, requires GTest)
 option(CELL_BUILD_TESTS "Build unit tests" ON)
 
@@ -56,4 +63,9 @@ if(CELL_BUILD_TESTS)
     add_executable(test_buddy tests/test_buddy.cpp)
     target_link_libraries(test_buddy PRIVATE cell)
     add_test(NAME test_buddy COMMAND test_buddy)
+
+    # Memory statistics test
+    add_executable(test_stats tests/test_stats.cpp)
+    target_link_libraries(test_stats PRIVATE cell)
+    add_test(NAME test_stats COMMAND test_stats)
 endif()

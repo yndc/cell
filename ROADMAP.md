@@ -24,6 +24,12 @@ Large Allocations complete:
 - Direct OS allocation for >2MB (with optional huge pages)
 - Automatic size routing in alloc_bytes()
 
+Memory Statistics complete:
+- Compile-time optional via `CELL_ENABLE_STATS`
+- Global, per-allocator, and per-tag tracking
+- Peak usage tracking
+- `get_stats()`, `dump_stats()`, `reset_stats()` API
+
 ---
 
 ## Planned
@@ -36,15 +42,6 @@ Large Allocations complete:
 - [ ] TLS cache for bins 0-3 (16B, 32B, 64B, 128B) — most common sizes
 - [ ] Batch refill from global bin
 - [ ] Flush on thread exit
-
----
-
-### Memory Statistics & Profiling
-
-- [ ] Per-tag memory tracking
-- [ ] `get_stats()` API
-- [ ] Peak usage tracking
-- [ ] `dump_stats()` for debugging
 
 ---
 
@@ -75,6 +72,6 @@ Large Allocations complete:
 | 0.2.0   | Sub-cell allocator (Layer 2) ✓ |
 | 0.3.0   | Arena allocator ✓ |
 | 0.4.0   | Pool\<T\> + ArenaScope ✓ |
-| **0.5.0** | **Buddy + Large allocations ✓** ← Current |
-| 0.6.0   | Memory stats & profiling |
+| 0.5.0   | Buddy + Large allocations ✓ |
+| **0.6.0** | **Memory statistics ✓** ← Current |
 | 1.0.0   | Production-ready with all debug features |

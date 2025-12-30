@@ -5,6 +5,7 @@
 #include "cell.h"
 #include "config.h"
 #include "large.h"
+#include "stats.h"
 #include "sub_cell.h"
 
 #include <memory>
@@ -128,6 +129,27 @@ namespace Cell {
          */
         void free_cell(CellData *cell);
 
+        // =====================================================================
+        // Statistics (compile-time optional via CELL_ENABLE_STATS)
+        // =====================================================================
+
+#ifdef CELL_ENABLE_STATS
+        /**
+         * @brief Returns current memory statistics.
+         */
+        [[nodiscard]] const MemoryStats &get_stats() const { return m_stats; }
+
+        /**
+         * @brief Prints memory statistics to stdout.
+         */
+        void dump_stats() const { m_stats.dump(); }
+
+        /**
+         * @brief Resets all statistics counters.
+         */
+        void reset_stats() { m_stats.reset(); }
+#endif
+
     private:
         // =====================================================================
         // Sub-Cell Implementation
@@ -174,6 +196,10 @@ namespace Cell {
 
         // Large allocation registry for > 2MB
         LargeAllocRegistry m_large_allocs;
+
+#ifdef CELL_ENABLE_STATS
+        mutable MemoryStats m_stats;
+#endif
     };
 
 }

@@ -100,6 +100,7 @@ namespace Cell {
         // > 2MB: direct OS (large allocation)
 
         size_t usable_cell_size = kCellSize - kBlockStartOffset;
+        void *result = nullptr;
 
         if (size <= kMaxSubCellSize) {
             // Sub-cell allocation
@@ -111,9 +112,22 @@ namespace Cell {
                 CellData *cell = alloc_cell(tag);
                 if (cell)
                     cell->header.size_class = kFullCellMarker;
-                return cell;
+                result = cell;
+#ifdef CELL_ENABLE_STATS
+                if (result) {
+                    m_stats.record_alloc(kCellSize, tag);
+                    m_stats.cell_allocs.fetch_add(1, std::memory_order_relaxed);
+                }
+#endif
+                return result;
             }
-            return alloc_from_bin(bin_index, tag);
+            result = alloc_from_bin(bin_index, tag);
+#ifdef CELL_ENABLE_STATS
+            if (result) {
+                m_stats.record_alloc(kSizeClasses[bin_index], tag);
+                m_stats.subcell_allocs.fetch_add(1, std::memory_order_relaxed);
+            }
+#endif
         } else if (size <= usable_cell_size) {
             // Full cell allocation (up to ~16KB)
             if (!m_allocator)
@@ -121,11 +135,20 @@ namespace Cell {
             CellData *cell = alloc_cell(tag);
             if (cell)
                 cell->header.size_class = kFullCellMarker;
-            return cell;
+            result = cell;
+#ifdef CELL_ENABLE_STATS
+            if (result) {
+                m_stats.record_alloc(kCellSize, tag);
+                m_stats.cell_allocs.fetch_add(1, std::memory_order_relaxed);
+            }
+#endif
         } else {
             // Large allocation (buddy or direct OS)
-            return alloc_large(size, tag);
+            result = alloc_large(size, tag);
+            // Stats tracking handled in alloc_large
         }
+
+        return result;
     }
 
     void Context::free_bytes(void *ptr) {
@@ -135,23 +158,42 @@ namespace Cell {
 
         // Check which allocator owns this pointer
         if (m_buddy && m_buddy->owns(ptr)) {
+#ifdef CELL_ENABLE_STATS
+            // Note: We don't know the exact size for stats here.
+            // Buddy tracks it internally, but we don't expose it.
+            // For accurate tracking, we'd need to add a get_alloc_size() to buddy.
+            m_stats.buddy_frees.fetch_add(1, std::memory_order_relaxed);
+#endif
             m_buddy->free(ptr);
             return;
         }
 
         if (m_large_allocs.owns(ptr)) {
+#ifdef CELL_ENABLE_STATS
+            m_stats.large_frees.fetch_add(1, std::memory_order_relaxed);
+#endif
             m_large_allocs.free(ptr);
             return;
         }
 
         // Must be cell/sub-cell allocation
         CellHeader *header = get_header(ptr);
+        uint8_t tag = header->tag;
 
         if (header->size_class == kFullCellMarker) {
             // Full-cell allocation
+#ifdef CELL_ENABLE_STATS
+            m_stats.record_free(kCellSize, tag);
+            m_stats.cell_frees.fetch_add(1, std::memory_order_relaxed);
+#endif
             free_cell(reinterpret_cast<CellData *>(header));
         } else {
             // Sub-cell allocation
+#ifdef CELL_ENABLE_STATS
+            size_t block_size = kSizeClasses[header->size_class];
+            m_stats.record_free(block_size, tag);
+            m_stats.subcell_frees.fetch_add(1, std::memory_order_relaxed);
+#endif
             free_to_bin(ptr, header);
         }
     }
@@ -165,16 +207,33 @@ namespace Cell {
             return nullptr;
         }
 
+        void *result = nullptr;
+
         // Route: <= 2MB to buddy, > 2MB to direct OS
         if (size <= BuddyAllocator::kMaxBlockSize) {
             if (m_buddy) {
-                return m_buddy->alloc(size);
+                result = m_buddy->alloc(size);
+#ifdef CELL_ENABLE_STATS
+                if (result) {
+                    // Buddy rounds up to power-of-2
+                    m_stats.record_alloc(size, tag);
+                    m_stats.buddy_allocs.fetch_add(1, std::memory_order_relaxed);
+                }
+#endif
+                return result;
             }
             // Fallback to large alloc if buddy not initialized
         }
 
         // Direct OS allocation for > 2MB
-        return m_large_allocs.alloc(size, tag, try_huge_pages);
+        result = m_large_allocs.alloc(size, tag, try_huge_pages);
+#ifdef CELL_ENABLE_STATS
+        if (result) {
+            m_stats.record_alloc(size, tag);
+            m_stats.large_allocs.fetch_add(1, std::memory_order_relaxed);
+        }
+#endif
+        return result;
     }
 
     void Context::free_large(void *ptr) {
@@ -182,8 +241,14 @@ namespace Cell {
             return;
 
         if (m_buddy && m_buddy->owns(ptr)) {
+#ifdef CELL_ENABLE_STATS
+            m_stats.buddy_frees.fetch_add(1, std::memory_order_relaxed);
+#endif
             m_buddy->free(ptr);
         } else {
+#ifdef CELL_ENABLE_STATS
+            m_stats.large_frees.fetch_add(1, std::memory_order_relaxed);
+#endif
             m_large_allocs.free(ptr);
         }
     }
