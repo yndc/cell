@@ -19,6 +19,9 @@ namespace Cell {
             m_base = nullptr;
         }
 #endif
+        if (m_base) {
+            m_allocator = std::make_unique<Allocator>(m_base, m_reserved_size);
+        }
     }
 
     Context::~Context() {
@@ -32,14 +35,22 @@ namespace Cell {
     }
 
     CellData *Context::alloc(uint8_t tag) {
-        // TODO: Implement pool/TLS allocation
-        (void)tag;
-        return nullptr;
+        if (!m_allocator)
+            return nullptr;
+
+        void *ptr = m_allocator->alloc();
+        if (!ptr)
+            return nullptr;
+
+        auto *cell = static_cast<CellData *>(ptr);
+        cell->header.tag = tag;
+        return cell;
     }
 
     void Context::free(CellData *cell) {
-        // TODO: Implement pool/TLS return
-        (void)cell;
+        if (m_allocator && cell) {
+            m_allocator->free(cell);
+        }
     }
 
 }

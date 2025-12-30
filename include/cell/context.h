@@ -1,7 +1,10 @@
 #pragma once
 
+#include "allocator.h"
 #include "cell.h"
 #include "config.h"
+
+#include <memory>
 
 namespace Cell {
 
@@ -43,9 +46,9 @@ namespace Cell {
         void free(CellData *cell);
 
     private:
-        void *m_base = nullptr;      /**< Start of reserved address range. */
-        size_t m_reserved_size = 0;  /**< Total reserved bytes. */
-        size_t m_committed_size = 0; /**< Currently committed bytes. */
+        void *m_base = nullptr;                 ///< Start of reserved address range.
+        size_t m_reserved_size = 0;             ///< Total reserved bytes.
+        std::unique_ptr<Allocator> m_allocator; ///< Multi-tier allocator.
     };
 
 }

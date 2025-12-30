@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Library
 add_library(cell STATIC
+    src/allocator.cpp
     src/context.cpp
 )
 
@@ -25,6 +26,11 @@ if(CELL_BUILD_TESTS)
         target_link_libraries(cell_tests PRIVATE cell GTest::gtest_main)
         add_test(NAME cell_tests COMMAND cell_tests)
     else()
-        message(STATUS "GTest not found, skipping tests")
+        message(STATUS "GTest not found, skipping GTest-based tests")
     endif()
+
+    # Standalone allocator test (no GTest required)
+    add_executable(test_allocator tests/test_allocator.cpp)
+    target_link_libraries(test_allocator PRIVATE cell)
+    add_test(NAME test_allocator COMMAND test_allocator)
 endif()
