@@ -140,7 +140,9 @@ namespace Cell {
     // Markers
     // =========================================================================
 
-    Arena::Marker Arena::save() const { return Marker{m_current_cell_index, m_offset}; }
+    Arena::Marker Arena::save() const {
+        return Marker{m_current_cell_index, m_offset, m_total_allocated};
+    }
 
     void Arena::reset_to_marker(Marker marker) {
         assert(marker.cell_index <= m_current_cell_index && "Invalid marker");
@@ -148,48 +150,15 @@ namespace Cell {
         if (marker.cell_index == m_current_cell_index) {
             // Same cell, just adjust offset
             assert(marker.offset <= m_offset && "Invalid marker offset");
-            m_total_allocated -= (m_offset - marker.offset);
-            m_offset = marker.offset;
-            return;
         }
 
-        // Need to walk back through cells
-        // Our list is newest-first, so we need to count from head
-
-        // Calculate how many cells to keep
-        size_t cells_to_keep = marker.cell_index + 1;
-        size_t cells_to_release = m_cell_count - cells_to_keep;
-
-        // Find the cell at marker.cell_index
-        CellData *target = m_head;
-        size_t current_idx = m_current_cell_index;
-
-        // Walk back (but linked list goes forward to older cells)
-        // Actually, we need to restructure: newest is head, link->next is older
-        // So cell_index 0 is oldest, cell_index m_cell_count-1 is newest (head)
-
-        // Walk from head (newest) backward in index
-        size_t steps_to_target = m_current_cell_index - marker.cell_index;
-        for (size_t i = 0; i < steps_to_target; ++i) {
-            CellLink *link = get_link(target);
-            if (!link->next)
-                break;
-            target = link->next;
-        }
-
-        // Release cells newer than target (they're before target in the list)
-        // Wait, if newest is head, then older cells are via link->next
-        // So to release cells after marker, we need to:
-        // 1. Keep cells from oldest up to marker.cell_index
-        // 2. Release cells from marker.cell_index+1 to newest (head)
-
-        // This is getting complex. Let's simplify:
-        // For now, just reset offset and trust the user
-        // A full implementation would properly manage the cell list
-
+        // Reset to marker state
         m_offset = marker.offset;
         m_current_cell_index = marker.cell_index;
-        // m_total_allocated tracking is approximate after marker reset
+        m_total_allocated = marker.total_allocated;
+
+        // Note: Cells are not released back to context - they're kept for reuse.
+        // The linked list remains intact, we just reset the allocation point.
     }
 
     // =========================================================================

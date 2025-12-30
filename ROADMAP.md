@@ -90,8 +90,8 @@ Layer 3 (Arena Allocator) is complete:
 |---------|----------|
 | 0.1.0   | Cell allocator (Layer 1) ✓ |
 | 0.2.0   | Sub-cell allocator (Layer 2) ✓ |
-| **0.3.0** | **Arena allocator ✓** ← Current |
-| 0.4.0   | Pool<T> + Stack allocator |
+| 0.3.0   | Arena allocator ✓ |
+| **0.4.0** | **Pool\<T\> + ArenaScope ✓** ← Current |
 | 0.5.0   | Memory stats & profiling |
 | 0.6.0   | Large allocations |
 | 1.0.0   | Production-ready with all debug features |

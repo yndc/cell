@@ -99,6 +99,7 @@ namespace Cell {
         struct Marker {
             size_t cell_index;
             size_t offset;
+            size_t total_allocated;
         };
 
         /**

@@ -44,4 +44,9 @@ if(CELL_BUILD_TESTS)
     add_executable(test_arena tests/test_arena.cpp)
     target_link_libraries(test_arena PRIVATE cell)
     add_test(NAME test_arena COMMAND test_arena)
+
+    # Pool<T> and ArenaScope test
+    add_executable(test_pool tests/test_pool.cpp)
+    target_link_libraries(test_pool PRIVATE cell)
+    add_test(NAME test_pool COMMAND test_pool)
 endif()
