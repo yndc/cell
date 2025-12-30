@@ -8,6 +8,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 add_library(cell STATIC
     src/allocator.cpp
     src/context.cpp
+    src/arena.cpp
 )
 
 target_include_directories(cell PUBLIC
@@ -38,5 +39,9 @@ if(CELL_BUILD_TESTS)
     add_executable(test_sub_cell tests/test_sub_cell.cpp)
     target_link_libraries(test_sub_cell PRIVATE cell)
     add_test(NAME test_sub_cell COMMAND test_sub_cell)
-endif()
 
+    # Arena allocator test
+    add_executable(test_arena tests/test_arena.cpp)
+    target_link_libraries(test_arena PRIVATE cell)
+    add_test(NAME test_arena COMMAND test_arena)
+endif()
