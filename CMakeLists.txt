@@ -94,4 +94,9 @@ if(CELL_BUILD_TESTS)
     add_executable(test_debug tests/test_debug.cpp)
     target_link_libraries(test_debug PRIVATE cell)
     add_test(NAME test_debug COMMAND test_debug)
+
+    # Large allocation test
+    add_executable(test_large tests/test_large.cpp)
+    target_link_libraries(test_large PRIVATE cell)
+    add_test(NAME test_large COMMAND test_large)
 endif()

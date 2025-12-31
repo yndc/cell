@@ -62,6 +62,23 @@ namespace Cell {
         void free(void *ptr);
 
         /**
+         * @brief Reallocates a large block to a new size.
+         *
+         * Behavior:
+         * - If ptr is nullptr, behaves like alloc(new_size, tag)
+         * - If new_size is 0, behaves like free(ptr)
+         * - Otherwise, attempts to resize the allocation
+         * - Data is preserved up to min(old_size, new_size)
+         * - May return a different pointer if reallocation requires movement
+         *
+         * @param ptr Pointer from previous alloc/alloc_aligned/realloc_bytes call
+         * @param new_size New size in bytes
+         * @param tag Memory tag for profiling (used if new allocation needed)
+         * @return Pointer to resized block, or nullptr on failure (old block unchanged)
+         */
+        [[nodiscard]] void *realloc_bytes(void *ptr, size_t new_size, uint8_t tag = 0);
+
+        /**
          * @brief Allocates a large block with explicit alignment.
          *
          * Uses platform-specific aligned allocation (posix_memalign, _aligned_malloc).

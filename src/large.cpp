@@ -112,6 +112,51 @@ namespace Cell {
 #endif
     }
 
+    void *LargeAllocRegistry::realloc_bytes(void *ptr, size_t new_size, uint8_t tag) {
+        // Edge case: nullptr -> behaves like alloc()
+        if (!ptr) {
+            return alloc(new_size, tag);
+        }
+
+        // Edge case: zero size -> behaves like free()
+        if (new_size == 0) {
+            free(ptr);
+            return nullptr;
+        }
+
+        // Look up existing allocation
+        std::lock_guard<std::mutex> lock(m_lock);
+        auto it = m_allocs.find(ptr);
+        if (it == m_allocs.end()) {
+            // Invalid pointer - not owned by this registry
+            return nullptr;
+        }
+
+        size_t old_size = it->second.size;
+        uint8_t old_tag = it->second.tag;
+
+        // Unlock before allocating new block (avoid holding lock during OS call)
+        m_lock.unlock();
+
+        // Allocate new block
+        // Note: Using simple allocate+copy+free for phase 1.
+        // Future optimization: use mremap() on Linux for in-place expansion
+        void *new_ptr = alloc(new_size, old_tag);
+        if (!new_ptr) {
+            // Allocation failed - original block unchanged
+            return nullptr;
+        }
+
+        // Copy data (preserve up to minimum of old and new size)
+        size_t copy_size = (old_size < new_size) ? old_size : new_size;
+        std::memcpy(new_ptr, ptr, copy_size);
+
+        // Free old block
+        free(ptr);
+
+        return new_ptr;
+    }
+
     void *LargeAllocRegistry::alloc_aligned(size_t size, size_t alignment, uint8_t tag) {
         if (size == 0 || alignment == 0) {
             return nullptr;
