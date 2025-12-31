@@ -4,9 +4,9 @@
 
 ### Debug Features
 
-- [ ] Bounds checking (guard bytes)
-- [ ] Stack trace capture on allocation
-- [ ] Leak detection report
+- [x] Bounds checking (guard bytes)
+- [x] Stack trace capture on allocation
+- [x] Leak detection report
 
 ### API Enhancements
 
@@ -32,5 +32,6 @@
 | 0.4.0   | Pool\<T\> + ArenaScope ✓ |
 | 0.5.0   | Buddy + Large allocations ✓ |
 | 0.6.0   | Memory statistics ✓ |
-| **0.7.0** | **TLS bin cache + Memory decommit ✓** ← Current |
-| 1.0.0   | Production-ready with all debug features |
+| 0.7.0   | TLS bin cache + Memory decommit ✓ |
+| **0.8.0** | **Debug features (guards, stack traces, leaks) ✓** ← Current |
+| 1.0.0   | Production-ready with all API enhancements |

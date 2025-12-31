@@ -4,12 +4,16 @@
 #include "buddy.h"
 #include "cell.h"
 #include "config.h"
+#include "debug.h"
 #include "large.h"
 #include "stats.h"
 #include "sub_cell.h"
 
 #include <memory>
 #include <mutex>
+#ifdef CELL_DEBUG_LEAKS
+#include <unordered_map>
+#endif
 
 namespace Cell {
 
@@ -177,6 +181,34 @@ namespace Cell {
         void reset_stats() { m_stats.reset(); }
 #endif
 
+        // =====================================================================
+        // Debug Features (compile-time optional)
+        // =====================================================================
+
+#ifdef CELL_DEBUG_GUARDS
+        /**
+         * @brief Checks if an allocation's guard bytes are intact.
+         *
+         * @param ptr Pointer returned by alloc_bytes().
+         * @return true if guards are valid, false if corrupted.
+         */
+        [[nodiscard]] bool check_guards(void *ptr) const;
+#endif
+
+#ifdef CELL_DEBUG_LEAKS
+        /**
+         * @brief Reports all currently live allocations to stderr.
+         *
+         * Prints size, tag, and stack trace (if CELL_DEBUG_STACKTRACE is enabled).
+         */
+        void report_leaks() const;
+
+        /**
+         * @brief Returns number of live (unfreed) allocations.
+         */
+        [[nodiscard]] size_t live_allocation_count() const;
+#endif
+
     private:
         // =====================================================================
         // Sub-Cell Implementation
@@ -233,6 +265,11 @@ namespace Cell {
 
 #ifdef CELL_ENABLE_STATS
         mutable MemoryStats m_stats;
+#endif
+
+#ifdef CELL_DEBUG_LEAKS
+        mutable std::unordered_map<void *, DebugAllocation> m_live_allocs;
+        mutable std::mutex m_debug_mutex;
 #endif
     };
 

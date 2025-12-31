@@ -3,6 +3,7 @@
 #include "tls_bin_cache.h"
 
 #include <cassert>
+#include <cstdio>
 #include <cstring>
 
 #if defined(_WIN32)
@@ -66,6 +67,15 @@ namespace Cell {
     }
 
     Context::~Context() {
+#ifdef CELL_DEBUG_LEAKS
+        // Report any leaked allocations before cleanup
+        if (!m_live_allocs.empty()) {
+            std::fprintf(stderr, "\n[CELL] WARNING: %zu allocation(s) leaked:\n",
+                         m_live_allocs.size());
+            report_leaks();
+        }
+#endif
+
         // Clear TLS bin caches to prevent stale pointers for future Contexts.
         // The cached blocks will be freed when the memory region is unmapped.
         // Note: This only clears the current thread's caches.
@@ -111,40 +121,62 @@ namespace Cell {
         size_t usable_cell_size = kCellSize - kBlockStartOffset;
         void *result = nullptr;
 
-        if (size <= kMaxSubCellSize) {
+#ifdef CELL_DEBUG_GUARDS
+        // For sub-cell allocations that fit with guards, add space for guard bytes
+        size_t alloc_size = size;
+        bool will_have_guards = false;
+        if (size + (2 * kGuardSize) <= kMaxSubCellSize) {
+            alloc_size = size + (2 * kGuardSize);
+            will_have_guards = true;
+        }
+#else
+        size_t alloc_size = size;
+#endif
+
+        if (alloc_size <= kMaxSubCellSize) {
             // Sub-cell allocation
             if (!m_allocator)
                 return nullptr;
-            uint8_t bin_index = get_size_class(size, alignment);
+            uint8_t bin_index = get_size_class(alloc_size, alignment);
             if (bin_index == kFullCellMarker) {
                 // Rare edge case: alignment pushes us to full cell
                 CellData *cell = alloc_cell(tag);
-                if (cell)
+                if (cell) {
                     cell->header.size_class = kFullCellMarker;
-                result = cell;
+                    // Return pointer to usable area, not the header
+                    result = get_block_start(&cell->header);
+                }
+#ifdef CELL_DEBUG_GUARDS
+                will_have_guards = false; // Full cell, no guards
+#endif
 #ifdef CELL_ENABLE_STATS
                 if (result) {
                     m_stats.record_alloc(kCellSize, tag);
                     m_stats.cell_allocs.fetch_add(1, std::memory_order_relaxed);
                 }
 #endif
-                return result;
-            }
-            result = alloc_from_bin(bin_index, tag);
+            } else {
+                result = alloc_from_bin(bin_index, tag);
 #ifdef CELL_ENABLE_STATS
-            if (result) {
-                m_stats.record_alloc(kSizeClasses[bin_index], tag);
-                m_stats.subcell_allocs.fetch_add(1, std::memory_order_relaxed);
-            }
+                if (result) {
+                    m_stats.record_alloc(kSizeClasses[bin_index], tag);
+                    m_stats.subcell_allocs.fetch_add(1, std::memory_order_relaxed);
+                }
 #endif
+            }
         } else if (size <= usable_cell_size) {
             // Full cell allocation (up to ~16KB)
             if (!m_allocator)
                 return nullptr;
             CellData *cell = alloc_cell(tag);
-            if (cell)
+            if (cell) {
                 cell->header.size_class = kFullCellMarker;
-            result = cell;
+                // Return pointer to usable area, not the header
+                result = get_block_start(&cell->header);
+            }
+#ifdef CELL_DEBUG_GUARDS
+            will_have_guards = false;
+#endif
 #ifdef CELL_ENABLE_STATS
             if (result) {
                 m_stats.record_alloc(kCellSize, tag);
@@ -154,8 +186,47 @@ namespace Cell {
         } else {
             // Large allocation (buddy or direct OS)
             result = alloc_large(size, tag);
+#ifdef CELL_DEBUG_GUARDS
+            will_have_guards = false;
+#endif
             // Stats tracking handled in alloc_large
         }
+
+        if (!result) {
+            return nullptr;
+        }
+
+#ifdef CELL_DEBUG_GUARDS
+        // Only apply guards when we allocated extra space for them
+        if (will_have_guards) {
+            // Fill front guard bytes
+            auto *guard_ptr = static_cast<uint8_t *>(result);
+            std::memset(guard_ptr, kGuardPattern, kGuardSize);
+
+            // Calculate user pointer (after front guard)
+            void *user_ptr = guard_ptr + kGuardSize;
+
+            // Fill back guard bytes
+            std::memset(static_cast<uint8_t *>(user_ptr) + size, kGuardPattern, kGuardSize);
+
+            result = user_ptr;
+        }
+#endif
+
+#ifdef CELL_DEBUG_LEAKS
+        // Track this allocation
+        {
+            std::lock_guard<std::mutex> lock(m_debug_mutex);
+            DebugAllocation alloc{};
+            alloc.ptr = result;
+            alloc.size = size;
+            alloc.tag = tag;
+#ifdef CELL_DEBUG_STACKTRACE
+            alloc.stack_depth = capture_stack(alloc.stack, kMaxStackDepth, 2);
+#endif
+            m_live_allocs[result] = alloc;
+        }
+#endif
 
         return result;
     }
@@ -165,12 +236,23 @@ namespace Cell {
             return;
         }
 
-        // Check which allocator owns this pointer
+#ifdef CELL_DEBUG_LEAKS
+        // Remove from tracking and get allocation size
+        size_t alloc_size = 0;
+        {
+            std::lock_guard<std::mutex> lock(m_debug_mutex);
+            auto it = m_live_allocs.find(ptr);
+            if (it != m_live_allocs.end()) {
+                alloc_size = it->second.size;
+                m_live_allocs.erase(it);
+            }
+        }
+#endif
+
+        // First, check for buddy and large allocations (no guards applied to these)
+        // For these, use the pointer as-is without guard adjustment
         if (m_buddy && m_buddy->owns(ptr)) {
 #ifdef CELL_ENABLE_STATS
-            // Note: We don't know the exact size for stats here.
-            // Buddy tracks it internally, but we don't expose it.
-            // For accurate tracking, we'd need to add a get_alloc_size() to buddy.
             m_stats.buddy_frees.fetch_add(1, std::memory_order_relaxed);
 #endif
             m_buddy->free(ptr);
@@ -186,6 +268,52 @@ namespace Cell {
         }
 
         // Must be cell/sub-cell allocation
+        // For sub-cell (bin) allocations with small enough sizes, guards were applied
+        // For full-cell allocations or large sub-cell allocations, no guards
+
+#if defined(CELL_DEBUG_GUARDS) && defined(CELL_DEBUG_LEAKS)
+        // Determine if guards were applied based on allocation size
+        // Guards are only applied when: size + 2*kGuardSize <= kMaxSubCellSize
+        // Since alloc_size stores the original requested size, check that
+        bool has_guards = (alloc_size > 0 && (alloc_size + 2 * kGuardSize) <= kMaxSubCellSize);
+
+        if (has_guards) {
+            auto *user_ptr = static_cast<uint8_t *>(ptr);
+            auto *front_guard = user_ptr - kGuardSize;
+
+            // Validate front guard
+            for (size_t i = 0; i < kGuardSize; ++i) {
+                if (front_guard[i] != kGuardPattern) {
+                    std::fprintf(
+                        stderr,
+                        "[CELL] ERROR: Front guard corrupted at offset %zu (expected 0x%02X, got "
+                        "0x%02X)\n",
+                        i, kGuardPattern, front_guard[i]);
+                    assert(false && "Memory corruption: front guard bytes overwritten");
+                }
+            }
+
+            // Validate back guard
+            auto *back_guard = user_ptr + alloc_size;
+            for (size_t i = 0; i < kGuardSize; ++i) {
+                if (back_guard[i] != kGuardPattern) {
+                    std::fprintf(
+                        stderr,
+                        "[CELL] ERROR: Back guard corrupted at offset %zu (expected 0x%02X, got "
+                        "0x%02X)\n",
+                        i, kGuardPattern, back_guard[i]);
+                    assert(false && "Memory corruption: back guard bytes overwritten");
+                }
+            }
+
+            // Adjust pointer to original allocation
+            ptr = front_guard;
+        }
+#elif !defined(CELL_DEBUG_LEAKS)
+        // Without leak tracking, we can't know the original size, so skip guard checking
+        (void)alloc_size;
+#endif
+
         CellHeader *header = get_header(ptr);
         uint8_t tag = header->tag;
 
@@ -618,4 +746,64 @@ namespace Cell {
         }
     }
 
+    // =========================================================================
+    // Debug API Implementation
+    // =========================================================================
+
+#ifdef CELL_DEBUG_GUARDS
+    bool Context::check_guards(void *ptr) const {
+        if (!ptr) {
+            return false;
+        }
+
+        auto *user_ptr = static_cast<uint8_t *>(ptr);
+        auto *front_guard = user_ptr - kGuardSize;
+
+        // Check front guard
+        for (size_t i = 0; i < kGuardSize; ++i) {
+            if (front_guard[i] != kGuardPattern) {
+                return false;
+            }
+        }
+
+#ifdef CELL_DEBUG_LEAKS
+        // Check back guard if we have size info
+        {
+            std::lock_guard<std::mutex> lock(m_debug_mutex);
+            auto it = m_live_allocs.find(ptr);
+            if (it != m_live_allocs.end()) {
+                auto *back_guard = user_ptr + it->second.size;
+                for (size_t i = 0; i < kGuardSize; ++i) {
+                    if (back_guard[i] != kGuardPattern) {
+                        return false;
+                    }
+                }
+            }
+        }
+#endif
+
+        return true;
+    }
+#endif
+
+#ifdef CELL_DEBUG_LEAKS
+    void Context::report_leaks() const {
+        std::lock_guard<std::mutex> lock(m_debug_mutex);
+
+        for (const auto &[ptr, alloc] : m_live_allocs) {
+            std::fprintf(stderr, "  Leak: %p, size=%zu, tag=%u\n", alloc.ptr, alloc.size,
+                         alloc.tag);
+#ifdef CELL_DEBUG_STACKTRACE
+            if (alloc.stack_depth > 0) {
+                print_stack(alloc.stack, alloc.stack_depth);
+            }
+#endif
+        }
+    }
+
+    size_t Context::live_allocation_count() const {
+        std::lock_guard<std::mutex> lock(m_debug_mutex);
+        return m_live_allocs.size();
+    }
+#endif
 }

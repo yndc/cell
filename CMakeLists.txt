@@ -10,6 +10,7 @@ add_library(cell STATIC
     src/context.cpp
     src/arena.cpp
     src/buddy.cpp
+    src/debug.cpp
     src/large.cpp
 )
 
@@ -23,6 +24,26 @@ option(CELL_ENABLE_STATS "Enable memory statistics tracking" OFF)
 if(CELL_ENABLE_STATS)
     target_compile_definitions(cell PUBLIC CELL_ENABLE_STATS)
     message(STATUS "Cell: Memory statistics enabled")
+endif()
+
+# Debug features (compile-time optional)
+option(CELL_DEBUG_GUARDS "Enable guard bytes for bounds checking" OFF)
+option(CELL_DEBUG_STACKTRACE "Enable stack trace capture on allocation" OFF)
+option(CELL_DEBUG_LEAKS "Enable leak detection" OFF)
+
+if(CELL_DEBUG_GUARDS)
+    target_compile_definitions(cell PUBLIC CELL_DEBUG_GUARDS)
+    message(STATUS "Cell: Guard bytes enabled")
+endif()
+
+if(CELL_DEBUG_STACKTRACE)
+    target_compile_definitions(cell PUBLIC CELL_DEBUG_STACKTRACE)
+    message(STATUS "Cell: Stack trace capture enabled")
+endif()
+
+if(CELL_DEBUG_LEAKS)
+    target_compile_definitions(cell PUBLIC CELL_DEBUG_LEAKS)
+    message(STATUS "Cell: Leak detection enabled")
 endif()
 
 # Tests (optional, requires GTest)
@@ -68,4 +89,9 @@ if(CELL_BUILD_TESTS)
     add_executable(test_stats tests/test_stats.cpp)
     target_link_libraries(test_stats PRIVATE cell)
     add_test(NAME test_stats COMMAND test_stats)
+
+    # Debug features test
+    add_executable(test_debug tests/test_debug.cpp)
+    target_link_libraries(test_debug PRIVATE cell)
+    add_test(NAME test_debug COMMAND test_debug)
 endif()
