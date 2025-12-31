@@ -32,7 +32,7 @@ namespace Cell {
 
         // Initialize all superblocks as uncommitted
         for (size_t i = 0; i < m_num_superblocks; ++i) {
-            m_superblock_states[i] = SuperblockState::kUncommitted;
+            m_superblock_states[i].store(SuperblockState::kUncommitted, std::memory_order_relaxed);
             m_free_cells[i].store(0, std::memory_order_relaxed);
         }
     }
@@ -69,7 +69,8 @@ namespace Cell {
             if (sb_idx < m_num_superblocks) {
                 uint16_t old_free = m_free_cells[sb_idx].fetch_sub(1, std::memory_order_relaxed);
                 if (old_free == kCellsPerSuperblock) {
-                    m_superblock_states[sb_idx] = SuperblockState::kInUse;
+                    m_superblock_states[sb_idx].store(SuperblockState::kInUse,
+                                                      std::memory_order_relaxed);
                 }
             }
         }
@@ -102,7 +103,8 @@ namespace Cell {
             uint16_t new_free = m_free_cells[sb_idx].fetch_add(1, std::memory_order_relaxed) + 1;
             // Mark as free if all cells are now free
             if (new_free == kCellsPerSuperblock) {
-                m_superblock_states[sb_idx] = SuperblockState::kFree;
+                m_superblock_states[sb_idx].store(SuperblockState::kFree,
+                                                  std::memory_order_relaxed);
             }
         }
 
@@ -129,17 +131,19 @@ namespace Cell {
         size_t total_freed = 0;
 
         for (size_t i = 0; i < m_num_superblocks; ++i) {
-            if (m_superblock_states[i] == SuperblockState::kFree) {
+            if (m_superblock_states[i].load(std::memory_order_relaxed) == SuperblockState::kFree) {
                 void *sb_addr = static_cast<char *>(m_base) + i * kSuperblockSize;
 
 #if defined(_WIN32)
                 if (VirtualFree(sb_addr, kSuperblockSize, MEM_DECOMMIT)) {
-                    m_superblock_states[i] = SuperblockState::kDecommitted;
+                    m_superblock_states[i].store(SuperblockState::kDecommitted,
+                                                 std::memory_order_relaxed);
                     total_freed += kSuperblockSize;
                 }
 #else
                 if (madvise(sb_addr, kSuperblockSize, MADV_DONTNEED) == 0) {
-                    m_superblock_states[i] = SuperblockState::kDecommitted;
+                    m_superblock_states[i].store(SuperblockState::kDecommitted,
+                                                 std::memory_order_relaxed);
                     total_freed += kSuperblockSize;
                 }
 #endif
@@ -152,7 +156,7 @@ namespace Cell {
     size_t Allocator::committed_bytes() const {
         size_t committed = 0;
         for (size_t i = 0; i < m_num_superblocks; ++i) {
-            SuperblockState state = m_superblock_states[i];
+            SuperblockState state = m_superblock_states[i].load(std::memory_order_relaxed);
             if (state == SuperblockState::kInUse || state == SuperblockState::kFree) {
                 committed += kSuperblockSize;
             }
@@ -171,7 +175,8 @@ namespace Cell {
     bool Allocator::recommit_superblock(size_t index) {
         if (index >= m_num_superblocks)
             return false;
-        if (m_superblock_states[index] != SuperblockState::kDecommitted)
+        if (m_superblock_states[index].load(std::memory_order_relaxed) !=
+            SuperblockState::kDecommitted)
             return true;
 
         void *sb_addr = static_cast<char *>(m_base) + index * kSuperblockSize;
@@ -186,7 +191,7 @@ namespace Cell {
         }
 #endif
 
-        m_superblock_states[index] = SuperblockState::kInUse;
+        m_superblock_states[index].store(SuperblockState::kInUse, std::memory_order_relaxed);
         return true;
     }
 
@@ -199,7 +204,8 @@ namespace Cell {
         // Check if we need to recommit a decommitted superblock first
         // (This handles the case where we decommitted and need to reuse)
         for (size_t i = 0; i < m_num_superblocks; ++i) {
-            if (m_superblock_states[i] == SuperblockState::kDecommitted) {
+            if (m_superblock_states[i].load(std::memory_order_relaxed) ==
+                SuperblockState::kDecommitted) {
                 if (recommit_superblock(i)) {
                     // Re-carve this superblock
                     void *sb_addr = static_cast<char *>(m_base) + i * kSuperblockSize;
@@ -244,7 +250,7 @@ namespace Cell {
 #endif
 
         // Mark superblock as in-use
-        m_superblock_states[sb_idx] = SuperblockState::kInUse;
+        m_superblock_states[sb_idx].store(SuperblockState::kInUse, std::memory_order_relaxed);
         m_free_cells[sb_idx].store(kCellsPerSuperblock - 1, std::memory_order_relaxed);
 
         // Carve superblock into cells, push all but one to global pool

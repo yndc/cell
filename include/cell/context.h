@@ -32,6 +32,11 @@ namespace Cell {
 
         /**
          * @brief Releases all virtual and physical memory.
+         *
+         * @warning All threads must stop using this Context before destruction.
+         * Any pointers obtained from this Context become invalid after destruction.
+         * Thread-local caches are only cleared for the calling thread; other
+         * threads should call flush_tls_bin_caches() before destruction.
          */
         ~Context();
 

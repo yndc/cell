@@ -97,10 +97,11 @@ namespace Cell {
         std::atomic<FreeCell *> m_global_head{nullptr}; ///< Lock-free stack head.
 
         // Superblock tracking for decommit
-        size_t m_num_superblocks{0};                            ///< Total superblocks possible.
-        SuperblockState m_superblock_states[kMaxSuperblocks]{}; ///< Per-superblock state.
-        std::atomic<uint16_t> m_free_cells[kMaxSuperblocks]{};  ///< Free cell count per superblock.
-        std::mutex m_decommit_mutex;                            ///< Protects decommit operations.
+        size_t m_num_superblocks{0}; ///< Total superblocks possible.
+        std::atomic<SuperblockState>
+            m_superblock_states[kMaxSuperblocks]{};            ///< Per-superblock state.
+        std::atomic<uint16_t> m_free_cells[kMaxSuperblocks]{}; ///< Free cell count per superblock.
+        std::mutex m_decommit_mutex;                           ///< Protects decommit operations.
     };
 
 }

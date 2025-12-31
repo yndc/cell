@@ -124,19 +124,20 @@ namespace Cell {
             return nullptr;
         }
 
-        // Look up existing allocation
-        std::lock_guard<std::mutex> lock(m_lock);
-        auto it = m_allocs.find(ptr);
-        if (it == m_allocs.end()) {
-            // Invalid pointer - not owned by this registry
-            return nullptr;
+        // Extract allocation info under lock, then release before OS calls
+        size_t old_size = 0;
+        uint8_t old_tag = 0;
+        {
+            std::lock_guard<std::mutex> lock(m_lock);
+            auto it = m_allocs.find(ptr);
+            if (it == m_allocs.end()) {
+                // Invalid pointer - not owned by this registry
+                return nullptr;
+            }
+            old_size = it->second.size;
+            old_tag = it->second.tag;
         }
-
-        size_t old_size = it->second.size;
-        uint8_t old_tag = it->second.tag;
-
-        // Unlock before allocating new block (avoid holding lock during OS call)
-        m_lock.unlock();
+        // Lock released here - ptr is still valid (we haven't freed it yet)
 
         // Allocate new block
         // Note: Using simple allocate+copy+free for phase 1.
