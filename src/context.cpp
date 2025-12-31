@@ -335,6 +335,95 @@ namespace Cell {
         }
     }
 
+    void *Context::realloc_bytes(void *ptr, size_t new_size, uint8_t tag) {
+        // Edge case: nullptr -> behaves like alloc
+        if (!ptr) {
+            return alloc_bytes(new_size, tag);
+        }
+
+        // Edge case: zero size -> behaves like free
+        if (new_size == 0) {
+            free_bytes(ptr);
+            return nullptr;
+        }
+
+        // Check buddy tier first
+        if (m_buddy && m_buddy->owns(ptr)) {
+            // For buddy allocations, check if new size still fits in buddy range
+            if (new_size <= BuddyAllocator::kMaxBlockSize &&
+                new_size >= BuddyAllocator::kMinBlockSize) {
+                // Stay in buddy tier
+                return m_buddy->realloc_bytes(ptr, new_size);
+            }
+            // Cross-tier: buddy -> somewhere else
+            // Get old size from buddy header
+            // Buddy stores order in header, block size = 2^order
+            // For now, use allocate+copy+free with conservative size estimate
+            void *new_ptr = alloc_bytes(new_size, tag);
+            if (!new_ptr)
+                return nullptr;
+            // Copy up to the smaller of old block size or new size
+            // Buddy min is 32KB, so copy at most new_size
+            std::memcpy(new_ptr, ptr, new_size);
+            m_buddy->free(ptr);
+            return new_ptr;
+        }
+
+        // Check large tier
+        if (m_large_allocs.owns(ptr)) {
+            // For large allocations, check if new size still needs large
+            if (new_size > BuddyAllocator::kMaxBlockSize) {
+                // Stay in large tier
+                return m_large_allocs.realloc_bytes(ptr, new_size, tag);
+            }
+            // Cross-tier: large -> smaller tier
+            void *new_ptr = alloc_bytes(new_size, tag);
+            if (!new_ptr)
+                return nullptr;
+            std::memcpy(new_ptr, ptr, new_size);
+            m_large_allocs.free(ptr);
+            return new_ptr;
+        }
+
+        // Must be cell/sub-cell allocation
+        CellHeader *header = get_header(ptr);
+        size_t old_size;
+
+        if (header->size_class == kFullCellMarker) {
+            // Full cell allocation
+            old_size = kCellSize - kBlockStartOffset;
+        } else {
+            // Sub-cell allocation
+            old_size = kSizeClasses[header->size_class];
+
+            // Same-bin optimization: if new size fits in same bin, return same pointer
+            // Must account for guards if enabled, to match what alloc_bytes does
+#ifdef CELL_DEBUG_GUARDS
+            size_t alloc_size = new_size;
+            if (new_size + (2 * kGuardSize) <= kMaxSubCellSize) {
+                alloc_size = new_size + (2 * kGuardSize);
+            }
+            uint8_t new_bin = get_size_class(alloc_size, 8);
+#else
+            uint8_t new_bin = get_size_class(new_size, 8);
+#endif
+            if (new_bin != kFullCellMarker && new_bin == header->size_class) {
+                return ptr; // Fits in same bin, no reallocation needed
+            }
+        }
+
+        // Fallback: allocate new block, copy data, free old block
+        void *new_ptr = alloc_bytes(new_size, tag);
+        if (!new_ptr) {
+            return nullptr; // Allocation failed, old block unchanged
+        }
+
+        std::memcpy(new_ptr, ptr, std::min(old_size, new_size));
+        free_bytes(ptr);
+
+        return new_ptr;
+    }
+
     // =========================================================================
     // Large Allocation API
     // =========================================================================

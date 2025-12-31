@@ -69,6 +69,22 @@ namespace Cell {
         void free_bytes(void *ptr);
 
         /**
+         * @brief Reallocates memory to a new size.
+         *
+         * Behavior:
+         * - If ptr is nullptr, behaves like alloc_bytes(new_size, tag)
+         * - If new_size is 0, behaves like free_bytes(ptr)
+         * - Data preserved up to min(old_size, new_size)
+         * - On failure, returns nullptr and old block is unchanged
+         *
+         * @param ptr Pointer from previous alloc_bytes/realloc_bytes
+         * @param new_size New size in bytes
+         * @param tag Tag for new allocation (used if allocating new block)
+         * @return Pointer to reallocated memory, or nullptr on failure
+         */
+        [[nodiscard]] void *realloc_bytes(void *ptr, size_t new_size, uint8_t tag = 0);
+
+        /**
          * @brief Allocates memory for a single object of type T.
          *
          * @tparam T Type to allocate (uses sizeof(T) and alignof(T)).

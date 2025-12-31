@@ -317,6 +317,142 @@ TEST(DebugPoisonDetection) {
 #endif
 
 // =============================================================================
+// Realloc Tests
+// =============================================================================
+
+// Test 11: Realloc same bin (no reallocation needed)
+TEST(ReallocSameBin) {
+    Cell::Config config;
+    config.reserve_size = 16 * 1024 * 1024;
+    Cell::Context ctx(config);
+
+    // Allocate 24 bytes (fits in 32-byte bin)
+    void *ptr = ctx.alloc_bytes(24, 1);
+    assert(ptr != nullptr);
+    std::memset(ptr, 0xAB, 24);
+
+    // Realloc to 28 bytes (still fits in 32-byte bin)
+    void *ptr2 = ctx.realloc_bytes(ptr, 28, 1);
+
+    // Should return same pointer (same bin optimization)
+    assert(ptr2 == ptr && "Same-bin realloc should return same pointer");
+
+    // Verify data preserved
+    uint8_t *bytes = static_cast<uint8_t *>(ptr2);
+    for (int i = 0; i < 24; ++i) {
+        assert(bytes[i] == 0xAB);
+    }
+
+    ctx.free_bytes(ptr2);
+    printf("  PASSED\n");
+}
+
+// Test 12: Realloc grow to larger bin
+TEST(ReallocGrowBin) {
+    Cell::Config config;
+    config.reserve_size = 16 * 1024 * 1024;
+    Cell::Context ctx(config);
+
+    // Allocate 50 bytes (fits in 64-byte bin)
+    void *ptr = ctx.alloc_bytes(50, 2);
+    assert(ptr != nullptr);
+    std::memset(ptr, 0xCD, 50);
+
+    // Realloc to 200 bytes (needs 256-byte bin)
+    void *ptr2 = ctx.realloc_bytes(ptr, 200, 2);
+    assert(ptr2 != nullptr);
+
+    // Verify data preserved
+    uint8_t *bytes = static_cast<uint8_t *>(ptr2);
+    for (int i = 0; i < 50; ++i) {
+        assert(bytes[i] == 0xCD);
+    }
+
+    ctx.free_bytes(ptr2);
+    printf("  PASSED\n");
+}
+
+// Test 13: Realloc shrink to smaller bin
+TEST(ReallocShrinkBin) {
+    Cell::Config config;
+    config.reserve_size = 16 * 1024 * 1024;
+    Cell::Context ctx(config);
+
+    // Allocate 200 bytes (fits in 256-byte bin)
+    void *ptr = ctx.alloc_bytes(200, 3);
+    assert(ptr != nullptr);
+    std::memset(ptr, 0xEF, 200);
+
+    // Realloc to 50 bytes (needs 64-byte bin)
+    void *ptr2 = ctx.realloc_bytes(ptr, 50, 3);
+    assert(ptr2 != nullptr);
+
+    // Verify data preserved (first 50 bytes)
+    uint8_t *bytes = static_cast<uint8_t *>(ptr2);
+    for (int i = 0; i < 50; ++i) {
+        assert(bytes[i] == 0xEF);
+    }
+
+    ctx.free_bytes(ptr2);
+    printf("  PASSED\n");
+}
+
+// Test 14: Realloc nullptr behaves like alloc
+TEST(ReallocNullPtr) {
+    Cell::Config config;
+    config.reserve_size = 16 * 1024 * 1024;
+    Cell::Context ctx(config);
+
+    void *ptr = ctx.realloc_bytes(nullptr, 100, 4);
+    assert(ptr != nullptr && "realloc(nullptr) should behave like alloc");
+
+    std::memset(ptr, 0x12, 100);
+    ctx.free_bytes(ptr);
+    printf("  PASSED\n");
+}
+
+// Test 15: Realloc zero size behaves like free
+TEST(ReallocZeroSize) {
+    Cell::Config config;
+    config.reserve_size = 16 * 1024 * 1024;
+    Cell::Context ctx(config);
+
+    void *ptr = ctx.alloc_bytes(100, 5);
+    assert(ptr != nullptr);
+
+    void *ptr2 = ctx.realloc_bytes(ptr, 0, 5);
+    assert(ptr2 == nullptr && "realloc(ptr, 0) should return nullptr");
+    // ptr has been freed, don't use it
+
+    printf("  PASSED\n");
+}
+
+// Test 16: Realloc cross-tier (sub-cell to buddy)
+TEST(ReallocSubCellToBuddy) {
+    Cell::Config config;
+    config.reserve_size = 128 * 1024 * 1024;
+    Cell::Context ctx(config);
+
+    // Allocate small (sub-cell)
+    void *ptr = ctx.alloc_bytes(100, 6);
+    assert(ptr != nullptr);
+    std::memset(ptr, 0x77, 100);
+
+    // Grow to buddy range (> 8KB, < 2MB)
+    void *ptr2 = ctx.realloc_bytes(ptr, 50 * 1024, 6);
+    assert(ptr2 != nullptr);
+
+    // Verify data preserved
+    uint8_t *bytes = static_cast<uint8_t *>(ptr2);
+    for (int i = 0; i < 100; ++i) {
+        assert(bytes[i] == 0x77);
+    }
+
+    ctx.free_bytes(ptr2);
+    printf("  PASSED\n");
+}
+
+// =============================================================================
 // Main
 // =============================================================================
 
