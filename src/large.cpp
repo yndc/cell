@@ -1,8 +1,10 @@
 #include "cell/large.h"
 
+#include <cstdlib>
 #include <cstring>
 
 #ifdef _WIN32
+#include <malloc.h> // For _aligned_malloc, _aligned_free
 #include <windows.h>
 #else
 #include <sys/mman.h>
@@ -72,7 +74,7 @@ namespace Cell {
 
         if (ptr) {
             std::lock_guard<std::mutex> lock(m_lock);
-            m_allocs[ptr] = LargeAlloc{size, tag, used_huge};
+            m_allocs[ptr] = LargeAlloc{size, ptr, tag, used_huge, false};
             m_total_allocated += size;
         }
 
@@ -90,14 +92,59 @@ namespace Cell {
         }
 
         size_t size = it->second.size;
+        void *original = it->second.original_ptr;
+        bool aligned = it->second.aligned;
         m_allocs.erase(it);
         m_total_allocated -= size;
 
 #ifdef _WIN32
-        VirtualFree(ptr, 0, MEM_RELEASE);
+        if (aligned) {
+            _aligned_free(original);
+        } else {
+            VirtualFree(original, 0, MEM_RELEASE);
+        }
 #else
-        munmap(ptr, size);
+        if (aligned) {
+            ::free(original); // posix_memalign uses standard free
+        } else {
+            munmap(original, size);
+        }
 #endif
+    }
+
+    void *LargeAllocRegistry::alloc_aligned(size_t size, size_t alignment, uint8_t tag) {
+        if (size == 0 || alignment == 0) {
+            return nullptr;
+        }
+
+        // Validate alignment is power of 2
+        if ((alignment & (alignment - 1)) != 0) {
+            return nullptr;
+        }
+
+        void *ptr = nullptr;
+
+#ifdef _WIN32
+        ptr = _aligned_malloc(size, alignment);
+#else
+        // posix_memalign requires alignment to be at least sizeof(void*)
+        // and a power of 2
+        size_t min_align = sizeof(void *);
+        if (alignment < min_align) {
+            alignment = min_align;
+        }
+        if (posix_memalign(&ptr, alignment, size) != 0) {
+            ptr = nullptr;
+        }
+#endif
+
+        if (ptr) {
+            std::lock_guard<std::mutex> lock(m_lock);
+            m_allocs[ptr] = LargeAlloc{size, ptr, tag, false, true};
+            m_total_allocated += size;
+        }
+
+        return ptr;
     }
 
     // =========================================================================

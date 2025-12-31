@@ -117,6 +117,20 @@ namespace Cell {
         void free_large(void *ptr);
 
         /**
+         * @brief Allocates memory with explicit alignment (buddy/large only).
+         *
+         * For sizes that fit in sub-cell/cell range, use regular alloc() which
+         * provides natural 16-byte alignment. This API is for cases requiring
+         * higher alignment (e.g., SIMD, cache lines, page boundaries).
+         *
+         * @param size Size in bytes.
+         * @param alignment Required alignment (must be power of 2).
+         * @param tag Application-defined tag for profiling.
+         * @return Aligned pointer, or nullptr on failure.
+         */
+        [[nodiscard]] void *alloc_aligned(size_t size, size_t alignment, uint8_t tag = 0);
+
+        /**
          * @brief Flushes thread-local sub-cell caches to global bins.
          *
          * Call this before thread exit to avoid leaked cached blocks.

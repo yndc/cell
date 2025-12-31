@@ -57,9 +57,21 @@ namespace Cell {
         /**
          * @brief Frees a previously allocated large block.
          *
-         * @param ptr Pointer returned by alloc().
+         * @param ptr Pointer returned by alloc() or alloc_aligned().
          */
         void free(void *ptr);
+
+        /**
+         * @brief Allocates a large block with explicit alignment.
+         *
+         * Uses platform-specific aligned allocation (posix_memalign, _aligned_malloc).
+         *
+         * @param size Size in bytes.
+         * @param alignment Required alignment (must be power of 2).
+         * @param tag Memory tag for profiling.
+         * @return Aligned pointer, or nullptr on failure.
+         */
+        [[nodiscard]] void *alloc_aligned(size_t size, size_t alignment, uint8_t tag = 0);
 
         // =====================================================================
         // Introspection
@@ -86,8 +98,10 @@ namespace Cell {
          */
         struct LargeAlloc {
             size_t size;
+            void *original_ptr; ///< Original pointer (for aligned allocs, may differ from key)
             uint8_t tag;
             bool huge_pages;
+            bool aligned; ///< Was this an aligned allocation?
         };
 
         std::unordered_map<void *, LargeAlloc> m_allocs;

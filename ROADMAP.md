@@ -10,7 +10,7 @@
 
 ### API Enhancements
 
-- [ ] Aligned allocation API (`alloc_aligned`)
+- [x] Aligned allocation API (`alloc_aligned`)
 - [ ] Realloc support (`realloc_bytes`)
 - [ ] STL-compatible allocator wrapper
 

@@ -390,6 +390,65 @@ namespace Cell {
         }
     }
 
+    void *Context::alloc_aligned(size_t size, size_t alignment, uint8_t tag) {
+        if (size == 0) {
+            return nullptr;
+        }
+
+        // Validate alignment is power of 2
+        if (alignment == 0 || (alignment & (alignment - 1)) != 0) {
+            return nullptr;
+        }
+
+        // For buddy allocations: check if natural power-of-2 alignment is sufficient
+        if (size <= BuddyAllocator::kMaxBlockSize && m_buddy) {
+            // Calculate the order (and thus natural alignment) for this size
+            // Account for buddy header (8 bytes)
+            size_t total_size = size + 8;
+            if (total_size < BuddyAllocator::kMinBlockSize) {
+                total_size = BuddyAllocator::kMinBlockSize;
+            }
+
+            // Round up to next power of 2 to find actual block size
+            size_t block_size = BuddyAllocator::kMinBlockSize;
+            while (block_size < total_size && block_size < BuddyAllocator::kMaxBlockSize) {
+                block_size <<= 1;
+            }
+
+            // Buddy blocks are naturally aligned to their size.
+            // The user pointer is offset by 8 bytes (header), so actual alignment
+            // is min(block_size, block_alignment_after_8_byte_offset).
+            // For power-of-2 blocks >= 32KB aligned, offset by 8 is still 8-byte aligned
+            // but the overall block is block_size aligned.
+            //
+            // If requested alignment <= block_size and block_size >= alignment,
+            // we can use buddy. Otherwise, use LargeAllocRegistry.
+            if (alignment <= block_size) {
+                void *result = m_buddy->alloc(size);
+#ifdef CELL_ENABLE_STATS
+                if (result) {
+                    m_stats.record_alloc(size, tag);
+                    m_stats.buddy_allocs.fetch_add(1, std::memory_order_relaxed);
+                }
+#endif
+                return result;
+            }
+            // For higher alignment requirements, fall through to LargeAllocRegistry
+        }
+
+        // Use LargeAllocRegistry for:
+        // - Sizes > 2MB
+        // - Alignments exceeding buddy's natural block alignment
+        void *result = m_large_allocs.alloc_aligned(size, alignment, tag);
+#ifdef CELL_ENABLE_STATS
+        if (result) {
+            m_stats.record_alloc(size, tag);
+            m_stats.large_allocs.fetch_add(1, std::memory_order_relaxed);
+        }
+#endif
+        return result;
+    }
+
     // =========================================================================
     // Cell-Level API
     // =========================================================================
