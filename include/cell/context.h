@@ -27,6 +27,17 @@ namespace Cell {
     using BudgetCallback = void (*)(size_t requested, size_t budget, size_t current);
 #endif
 
+#ifdef CELL_ENABLE_INSTRUMENTATION
+    /**
+     * @brief Callback invoked on each allocation and deallocation.
+     * @param ptr Pointer to allocated/freed memory.
+     * @param size Size in bytes (requested size, not rounded).
+     * @param tag Application-defined memory tag.
+     * @param is_alloc true for allocation, false for deallocation.
+     */
+    using AllocationCallback = void (*)(void *ptr, size_t size, uint8_t tag, bool is_alloc);
+#endif
+
     /**
      * @brief A memory environment owning a reserved virtual address range.
      *
@@ -249,6 +260,23 @@ namespace Cell {
 #endif
 
         // =====================================================================
+        // Instrumentation API (compile-time optional via CELL_ENABLE_INSTRUMENTATION)
+        // =====================================================================
+
+#ifdef CELL_ENABLE_INSTRUMENTATION
+        /**
+         * @brief Sets a callback to be invoked on every allocation/deallocation.
+         * @param cb Callback function, or nullptr to disable.
+         */
+        void set_alloc_callback(AllocationCallback cb) { m_alloc_callback = cb; }
+
+        /**
+         * @brief Returns the current allocation callback.
+         */
+        [[nodiscard]] AllocationCallback get_alloc_callback() const { return m_alloc_callback; }
+#endif
+
+        // =====================================================================
         // Debug Features (compile-time optional)
         // =====================================================================
 
@@ -347,6 +375,12 @@ namespace Cell {
         bool check_budget(size_t size);
         void record_budget_alloc(size_t size);
         void record_budget_free(size_t size);
+#endif
+
+#ifdef CELL_ENABLE_INSTRUMENTATION
+        AllocationCallback m_alloc_callback = nullptr;
+
+        void invoke_alloc_callback(void *ptr, size_t size, uint8_t tag, bool is_alloc);
 #endif
     };
 

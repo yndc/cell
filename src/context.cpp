@@ -98,6 +98,18 @@ namespace Cell {
     }
 #endif
 
+    // =========================================================================
+    // Instrumentation Helpers
+    // =========================================================================
+
+#ifdef CELL_ENABLE_INSTRUMENTATION
+    void Context::invoke_alloc_callback(void *ptr, size_t size, uint8_t tag, bool is_alloc) {
+        if (m_alloc_callback) {
+            m_alloc_callback(ptr, size, tag, is_alloc);
+        }
+    }
+#endif
+
     Context::~Context() {
 #ifdef CELL_DEBUG_LEAKS
         // Report any leaked allocations before cleanup
@@ -270,6 +282,10 @@ namespace Cell {
         record_budget_alloc(size);
 #endif
 
+#ifdef CELL_ENABLE_INSTRUMENTATION
+        invoke_alloc_callback(result, size, tag, true);
+#endif
+
         return result;
     }
 
@@ -277,6 +293,14 @@ namespace Cell {
         if (!ptr) {
             return;
         }
+
+#ifdef CELL_ENABLE_INSTRUMENTATION
+        // For instrumentation, we need the size before we lose it
+        // The callback will receive the originally requested size if available,
+        // otherwise 0 (for non-tracked tiers)
+        size_t callback_size = 0;
+        uint8_t callback_tag = 0;
+#endif
 
 #ifdef CELL_DEBUG_LEAKS
         // Remove from tracking and get allocation size
@@ -286,9 +310,17 @@ namespace Cell {
             auto it = m_live_allocs.find(ptr);
             if (it != m_live_allocs.end()) {
                 alloc_size = it->second.size;
+#ifdef CELL_ENABLE_INSTRUMENTATION
+                callback_size = it->second.size;
+                callback_tag = it->second.tag;
+#endif
                 m_live_allocs.erase(it);
             }
         }
+#endif
+
+#ifdef CELL_ENABLE_INSTRUMENTATION
+        invoke_alloc_callback(ptr, callback_size, callback_tag, false);
 #endif
 
         // First, check for buddy and large allocations (no guards applied to these)
@@ -554,6 +586,11 @@ namespace Cell {
                     m_stats.buddy_allocs.fetch_add(1, std::memory_order_relaxed);
                 }
 #endif
+#ifdef CELL_ENABLE_INSTRUMENTATION
+                if (result) {
+                    invoke_alloc_callback(result, size, tag, true);
+                }
+#endif
                 return result;
             }
             // Fallback to large alloc if buddy not initialized
@@ -567,12 +604,28 @@ namespace Cell {
             m_stats.large_allocs.fetch_add(1, std::memory_order_relaxed);
         }
 #endif
+#ifdef CELL_ENABLE_INSTRUMENTATION
+        if (result) {
+            invoke_alloc_callback(result, size, tag, true);
+        }
+#endif
         return result;
     }
 
     void Context::free_large(void *ptr) {
         if (!ptr)
             return;
+
+#ifdef CELL_ENABLE_INSTRUMENTATION
+        // Get size before freeing for callback
+        size_t freed_size = 0;
+        if (m_buddy && m_buddy->owns(ptr)) {
+            freed_size = m_buddy->get_alloc_size(ptr);
+        } else {
+            freed_size = m_large_allocs.get_alloc_size(ptr);
+        }
+        invoke_alloc_callback(ptr, freed_size, 0, false);
+#endif
 
         if (m_buddy && m_buddy->owns(ptr)) {
 #ifdef CELL_ENABLE_STATS
@@ -641,6 +694,11 @@ namespace Cell {
         if (result) {
             m_stats.record_alloc(size, tag);
             m_stats.large_allocs.fetch_add(1, std::memory_order_relaxed);
+        }
+#endif
+#ifdef CELL_ENABLE_INSTRUMENTATION
+        if (result) {
+            invoke_alloc_callback(result, size, tag, true);
         }
 #endif
         return result;

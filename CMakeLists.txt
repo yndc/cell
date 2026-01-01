@@ -53,6 +53,13 @@ if(CELL_ENABLE_BUDGET)
     message(STATUS "Cell: Memory budget limits enabled")
 endif()
 
+# Instrumentation callbacks (compile-time optional)
+option(CELL_ENABLE_INSTRUMENTATION "Enable allocation callbacks for instrumentation" OFF)
+if(CELL_ENABLE_INSTRUMENTATION)
+    target_compile_definitions(cell PUBLIC CELL_ENABLE_INSTRUMENTATION)
+    message(STATUS "Cell: Instrumentation callbacks enabled")
+endif()
+
 # Tests (optional, requires GTest)
 option(CELL_BUILD_TESTS "Build unit tests" ON)
 
@@ -111,4 +118,9 @@ if(CELL_BUILD_TESTS)
     add_executable(test_budget tests/test_budget.cpp)
     target_link_libraries(test_budget PRIVATE cell)
     add_test(NAME test_budget COMMAND test_budget)
+
+    # Instrumentation callbacks test
+    add_executable(test_instrumentation tests/test_instrumentation.cpp)
+    target_link_libraries(test_instrumentation PRIVATE cell)
+    add_test(NAME test_instrumentation COMMAND test_instrumentation)
 endif()

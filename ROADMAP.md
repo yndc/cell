@@ -18,7 +18,7 @@
 
 - [x] Thread safety audit
 - [x] Memory budget limits
-- [ ] Allocation callbacks for instrumentation
+- [x] Allocation callbacks for instrumentation
 
 ---
 
