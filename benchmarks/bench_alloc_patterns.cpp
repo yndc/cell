@@ -167,6 +167,39 @@ static void BM_Cell_BatchAlloc_64B(benchmark::State &state) {
 }
 BENCHMARK(BM_Cell_BatchAlloc_64B);
 
+// SIMD-optimized batch allocation using alloc_batch/free_batch API
+static void BM_Cell_BatchAPI_64B(benchmark::State &state) {
+    Cell::Context ctx;
+    const size_t batch_size = 1000;
+    std::vector<void *> ptrs(batch_size);
+
+    for (auto _ : state) {
+        size_t allocated = ctx.alloc_batch(64, ptrs.data(), batch_size);
+        benchmark::DoNotOptimize(ptrs.data());
+        benchmark::DoNotOptimize(allocated);
+
+        ctx.free_batch(ptrs.data(), allocated);
+    }
+    state.SetItemsProcessed(state.iterations() * batch_size);
+}
+BENCHMARK(BM_Cell_BatchAPI_64B);
+
+static void BM_Cell_BatchAPI_512B(benchmark::State &state) {
+    Cell::Context ctx;
+    const size_t batch_size = 1000;
+    std::vector<void *> ptrs(batch_size);
+
+    for (auto _ : state) {
+        size_t allocated = ctx.alloc_batch(512, ptrs.data(), batch_size);
+        benchmark::DoNotOptimize(ptrs.data());
+        benchmark::DoNotOptimize(allocated);
+
+        ctx.free_batch(ptrs.data(), allocated);
+    }
+    state.SetItemsProcessed(state.iterations() * batch_size);
+}
+BENCHMARK(BM_Cell_BatchAPI_512B);
+
 static void BM_Cell_BatchAlloc_1KB(benchmark::State &state) {
     Cell::Context ctx;
     const size_t batch_size = 1000;

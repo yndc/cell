@@ -13,6 +13,15 @@
 #include <unistd.h>
 #endif
 
+// SIMD intrinsics for batch operations
+#if defined(__x86_64__) || defined(_M_X64)
+#if defined(__AVX2__)
+#include <immintrin.h>
+#elif defined(__SSE2__)
+#include <emmintrin.h>
+#endif
+#endif
+
 namespace Cell {
 
     Context::Context(const Config &config) : m_reserved_size(config.reserve_size) {
@@ -312,6 +321,178 @@ namespace Cell {
 #endif
 
         return result;
+    }
+
+    // =========================================================================
+    // Batch Allocation API (SIMD-optimized)
+    // =========================================================================
+
+    size_t Context::alloc_batch(size_t size, void **out_ptrs, size_t count, uint8_t tag) {
+        if (CELL_UNLIKELY(count == 0 || !out_ptrs)) {
+            return 0;
+        }
+
+        // Only sub-cell sizes benefit from TLS fast path
+        if (CELL_UNLIKELY(size > kMaxSubCellSize || !m_allocator)) {
+            // Fall back to individual allocations for large sizes
+            size_t allocated = 0;
+            for (size_t i = 0; i < count; ++i) {
+                void *ptr = alloc_bytes(size, tag);
+                if (!ptr)
+                    break;
+                out_ptrs[i] = ptr;
+                ++allocated;
+            }
+            return allocated;
+        }
+
+        uint8_t bin_index = get_size_class_fast(size);
+        size_t allocated = 0;
+
+#if !defined(CELL_DEBUG_GUARDS) && !defined(CELL_DEBUG_LEAKS) && !defined(CELL_ENABLE_BUDGET)
+        // SIMD-optimized TLS cache drain for supported bins
+        if (CELL_LIKELY(bin_index < kTlsBinCacheCount)) {
+            TlsBinCache &cache = t_bin_cache[bin_index];
+
+            // Fast path: drain TLS cache in batches
+            while (allocated < count && cache.count > 0) {
+                // Calculate how many we can take from cache
+                size_t take = std::min(count - allocated, cache.count);
+
+#if defined(__AVX2__) && defined(__x86_64__)
+                // AVX2: Copy 4 pointers (32 bytes) at a time
+                while (take >= 4) {
+                    cache.count -= 4;
+                    __m256i ptrs = _mm256_loadu_si256(
+                        reinterpret_cast<const __m256i *>(&cache.blocks[cache.count]));
+                    _mm256_storeu_si256(reinterpret_cast<__m256i *>(&out_ptrs[allocated]), ptrs);
+                    allocated += 4;
+                    take -= 4;
+                }
+#elif defined(__SSE2__) && defined(__x86_64__)
+                // SSE2: Copy 2 pointers (16 bytes) at a time
+                while (take >= 2) {
+                    cache.count -= 2;
+                    __m128i ptrs = _mm_loadu_si128(
+                        reinterpret_cast<const __m128i *>(&cache.blocks[cache.count]));
+                    _mm_storeu_si128(reinterpret_cast<__m128i *>(&out_ptrs[allocated]), ptrs);
+                    allocated += 2;
+                    take -= 2;
+                }
+#endif
+                // Scalar fallback for remaining
+                while (take > 0) {
+                    out_ptrs[allocated++] = cache.blocks[--cache.count];
+                    --take;
+                }
+
+                // Refill cache if empty and need more
+                if (allocated < count && cache.count == 0) {
+                    batch_refill_tls_bin(bin_index, tag);
+                }
+            }
+
+#ifdef CELL_ENABLE_STATS
+            m_stats.subcell_allocs.fetch_add(allocated, std::memory_order_relaxed);
+            for (size_t i = 0; i < allocated; ++i) {
+                m_stats.record_alloc(kSizeClasses[bin_index], tag);
+            }
+#endif
+        }
+#endif
+
+        // Slow path: allocate remaining individually
+        while (allocated < count) {
+            void *ptr = alloc_from_bin(bin_index, tag);
+            if (!ptr)
+                break;
+            out_ptrs[allocated++] = ptr;
+
+#ifdef CELL_ENABLE_STATS
+            m_stats.record_alloc(kSizeClasses[bin_index], tag);
+            m_stats.subcell_allocs.fetch_add(1, std::memory_order_relaxed);
+#endif
+        }
+
+        return allocated;
+    }
+
+    void Context::free_batch(void **ptrs, size_t count) {
+        if (CELL_UNLIKELY(count == 0 || !ptrs)) {
+            return;
+        }
+
+#if !defined(CELL_DEBUG_GUARDS) && !defined(CELL_DEBUG_LEAKS) && !defined(CELL_ENABLE_BUDGET)
+        // Fast path: check if first pointer is in cell region
+        auto uptr = reinterpret_cast<uintptr_t>(ptrs[0]);
+        auto base = reinterpret_cast<uintptr_t>(m_base);
+
+        if (CELL_LIKELY(uptr >= base && uptr < base + m_reserved_size)) {
+            // Get size class from first pointer
+            CellHeader *first_header = get_header(ptrs[0]);
+            uint8_t size_class = first_header->size_class;
+
+            if (CELL_LIKELY(size_class < kTlsBinCacheCount)) {
+                TlsBinCache &cache = t_bin_cache[size_class];
+                size_t freed = 0;
+
+                // SIMD-optimized TLS cache fill
+                while (freed < count && cache.count < kTlsBinCacheCapacity) {
+                    size_t space = kTlsBinCacheCapacity - cache.count;
+                    size_t push = std::min(count - freed, space);
+
+#if defined(__AVX2__) && defined(__x86_64__)
+                    // AVX2: Copy 4 pointers at a time
+                    while (push >= 4) {
+                        __m256i block_ptrs =
+                            _mm256_loadu_si256(reinterpret_cast<const __m256i *>(&ptrs[freed]));
+                        _mm256_storeu_si256(reinterpret_cast<__m256i *>(&cache.blocks[cache.count]),
+                                            block_ptrs);
+                        cache.count += 4;
+                        freed += 4;
+                        push -= 4;
+                    }
+#elif defined(__SSE2__) && defined(__x86_64__)
+                    // SSE2: Copy 2 pointers at a time
+                    while (push >= 2) {
+                        __m128i block_ptrs =
+                            _mm_loadu_si128(reinterpret_cast<const __m128i *>(&ptrs[freed]));
+                        _mm_storeu_si128(reinterpret_cast<__m128i *>(&cache.blocks[cache.count]),
+                                         block_ptrs);
+                        cache.count += 2;
+                        freed += 2;
+                        push -= 2;
+                    }
+#endif
+                    // Scalar fallback
+                    while (push > 0) {
+                        cache.blocks[cache.count++] = static_cast<FreeBlock *>(ptrs[freed++]);
+                        --push;
+                    }
+                }
+
+#ifdef CELL_ENABLE_STATS
+                m_stats.subcell_frees.fetch_add(freed, std::memory_order_relaxed);
+#endif
+
+                // Fall through to free remaining
+                if (freed == count) {
+                    return;
+                }
+
+                // Free remaining that didn't fit in TLS cache
+                for (size_t i = freed; i < count; ++i) {
+                    free_bytes(ptrs[i]);
+                }
+                return;
+            }
+        }
+#endif
+
+        // Fallback: free individually
+        for (size_t i = 0; i < count; ++i) {
+            free_bytes(ptrs[i]);
+        }
     }
 
     void Context::free_bytes(void *ptr) {

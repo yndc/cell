@@ -134,6 +134,36 @@ namespace Cell {
         }
 
         // =====================================================================
+        // Batch Allocation API (SIMD-optimized for high throughput)
+        // =====================================================================
+
+        /**
+         * @brief Allocates multiple blocks of the same size.
+         *
+         * Optimized for batch workloads using SIMD operations when available.
+         * All blocks will be from the same size class.
+         *
+         * @param size Size of each block in bytes.
+         * @param out_ptrs Output array to receive allocated pointers.
+         * @param count Number of blocks to allocate.
+         * @param tag Application-defined tag for profiling.
+         * @return Number of blocks successfully allocated (may be < count on failure).
+         */
+        [[nodiscard]] size_t alloc_batch(size_t size, void **out_ptrs, size_t count,
+                                         uint8_t tag = 0);
+
+        /**
+         * @brief Frees multiple blocks at once.
+         *
+         * Optimized for batch workloads. All blocks must be valid allocations.
+         * For best performance, blocks should be from the same size class.
+         *
+         * @param ptrs Array of pointers to free.
+         * @param count Number of pointers in the array.
+         */
+        void free_batch(void **ptrs, size_t count);
+
+        // =====================================================================
         // Large Allocation API (explicit, for allocations > 16KB)
         // =====================================================================
 
