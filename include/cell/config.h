@@ -37,8 +37,8 @@ namespace Cell {
     /** @brief Number of cells cached per thread (TLS). */
     static constexpr size_t kTlsCacheCapacity = 64;
 
-    /** @brief Number of bins with TLS caching (bins 0-3: 16B, 32B, 64B, 128B). */
-    static constexpr size_t kTlsBinCacheCount = 4;
+    /** @brief Number of bins with TLS caching (bins 0-8: 16B to 4KB). */
+    static constexpr size_t kTlsBinCacheCount = 9;
 
     /** @brief Number of blocks cached per bin per thread. */
     static constexpr size_t kTlsBinCacheCapacity = 32;

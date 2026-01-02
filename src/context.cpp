@@ -189,9 +189,9 @@ namespace Cell {
                 return nullptr;
 
             // Fast path: common sizes with default alignment go through TLS cache
-            // directly, avoiding function call overhead
+            // directly, avoiding function call overhead (bins 0-8: 16B to 4KB)
 #if !defined(CELL_DEBUG_GUARDS) && !defined(CELL_DEBUG_LEAKS) && !defined(CELL_ENABLE_BUDGET)
-            if (CELL_LIKELY(alignment <= 8 && alloc_size <= 128)) {
+            if (CELL_LIKELY(alignment <= 8 && alloc_size <= 4096)) {
                 // Use O(1) size class lookup
                 uint8_t bin_index = get_size_class_fast(alloc_size);
 
