@@ -315,7 +315,7 @@ namespace Cell {
     }
 
     void Context::free_bytes(void *ptr) {
-        if (!ptr) {
+        if (CELL_UNLIKELY(!ptr)) {
             return;
         }
 
@@ -348,8 +348,39 @@ namespace Cell {
         invoke_alloc_callback(ptr, callback_size, callback_tag, false);
 #endif
 
-        // First, check for buddy and large allocations (no guards applied to these)
-        // For these, use the pointer as-is without guard adjustment
+        // Fast path: check if pointer is in cell region (most common case)
+        // This is O(1) pointer comparison, much faster than buddy/large ownership checks
+        auto uptr = reinterpret_cast<uintptr_t>(ptr);
+        auto base = reinterpret_cast<uintptr_t>(m_base);
+
+        if (CELL_LIKELY(uptr >= base && uptr < base + m_reserved_size)) {
+            // Cell/sub-cell allocation - this is the hot path
+#if !defined(CELL_DEBUG_GUARDS) && !defined(CELL_DEBUG_LEAKS) && !defined(CELL_ENABLE_BUDGET)
+            // Ultra-fast path: inline TLS free for hot bins
+            CellHeader *header = get_header(ptr);
+            uint8_t size_class = header->size_class;
+
+            if (CELL_LIKELY(size_class < kTlsBinCacheCount)) {
+                // Hot bin - try TLS cache first
+                TlsBinCache &cache = t_bin_cache[size_class];
+                if (CELL_LIKELY(cache.count < kTlsBinCacheCapacity)) {
+#ifndef NDEBUG
+                    std::memset(ptr, kPoisonByte, kSizeClasses[size_class]);
+#endif
+#ifdef CELL_ENABLE_STATS
+                    m_stats.record_free(kSizeClasses[size_class], header->tag);
+                    m_stats.subcell_frees.fetch_add(1, std::memory_order_relaxed);
+#endif
+                    cache.blocks[cache.count++] = static_cast<FreeBlock *>(ptr);
+                    return;
+                }
+            }
+#endif
+            // Fall through to normal cell/sub-cell handling
+            goto handle_cell_subcell;
+        }
+
+        // Slower path: check buddy and large allocations
         if (m_buddy && m_buddy->owns(ptr)) {
 #ifdef CELL_ENABLE_STATS
             m_stats.buddy_frees.fetch_add(1, std::memory_order_relaxed);
@@ -371,6 +402,11 @@ namespace Cell {
             m_large_allocs.free(ptr);
             return;
         }
+
+        // Not recognized - likely invalid pointer
+        return;
+
+    handle_cell_subcell:
 
         // Must be cell/sub-cell allocation
         // For sub-cell (bin) allocations with small enough sizes, guards were applied
