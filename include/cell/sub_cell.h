@@ -58,9 +58,11 @@ namespace Cell {
 #if defined(__GNUC__) || defined(__clang__)
 #define CELL_LIKELY(x) __builtin_expect(!!(x), 1)
 #define CELL_UNLIKELY(x) __builtin_expect(!!(x), 0)
+#define CELL_FORCE_INLINE __attribute__((always_inline)) inline
 #else
 #define CELL_LIKELY(x) (x)
 #define CELL_UNLIKELY(x) (x)
+#define CELL_FORCE_INLINE __forceinline
 #endif
 
     /**
@@ -72,7 +74,7 @@ namespace Cell {
      * @param size Size of the allocation (will be rounded up to min).
      * @return Bin index (0-9), or kFullCellMarker if too large.
      */
-    inline uint8_t get_size_class_fast(size_t size) {
+    CELL_FORCE_INLINE uint8_t get_size_class_fast(size_t size) {
         // Clamp to minimum
         if (CELL_UNLIKELY(size < kMinBlockSize)) {
             size = kMinBlockSize;
