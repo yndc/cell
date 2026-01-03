@@ -171,7 +171,8 @@ namespace Cell {
          * @brief Frees multiple blocks at once.
          *
          * Optimized for batch workloads. All blocks must be valid allocations.
-         * For best performance, blocks should be from the same size class.
+         * All pointers must belong to the sub-cell/cell tier and share the same
+         * size class; mixed tiers or sizes are not supported by this API.
          *
          * @param ptrs Array of pointers to free.
          * @param count Number of pointers in the array.

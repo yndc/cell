@@ -165,6 +165,10 @@ namespace Cell {
             return nullptr;
         }
 
+        if (alignment == 0 || (alignment & (alignment - 1)) != 0 || alignment > 16) {
+            return nullptr;
+        }
+
         // Size routing:
         // <= 8KB: sub-cell bins
         // <= 16KB (usable cell space): full cell
@@ -456,11 +460,11 @@ namespace Cell {
             // Validate homogeneous batch - mixed sizes corrupt freelists
             for (size_t i = 1; i < count; ++i) {
                 auto iptr = reinterpret_cast<uintptr_t>(ptrs[i]);
-                if (iptr >= base && iptr < base + m_reserved_size) {
-                    CellHeader *h = get_header(ptrs[i]);
-                    assert(h->size_class == size_class &&
-                           "free_batch requires all pointers to have same size class");
-                }
+                assert(iptr >= base && iptr < base + m_reserved_size &&
+                       "free_batch requires all pointers in cell region");
+                CellHeader *h = get_header(ptrs[i]);
+                assert(h->size_class == size_class &&
+                       "free_batch requires all pointers to have same size class");
             }
 #endif
 
