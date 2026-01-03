@@ -128,6 +128,11 @@ if(CELL_BUILD_TESTS)
     add_executable(test_stress tests/test_stress.cpp)
     target_link_libraries(test_stress PRIVATE cell)
     add_test(NAME test_stress COMMAND test_stress)
+
+    # Fuzzing stress tests
+    add_executable(test_fuzz tests/test_fuzz.cpp)
+    target_link_libraries(test_fuzz PRIVATE cell)
+    add_test(NAME test_fuzz COMMAND test_fuzz)
 endif()
 
 # Benchmarks (optional, requires Google Benchmark)
