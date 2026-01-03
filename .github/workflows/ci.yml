@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure CMake
+        run: cmake -B build -DCELL_BUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure --config Release
+
+  debug-features:
+    name: Debug Features (Linux)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install GTest
+        run: sudo apt-get update && sudo apt-get install -y libgtest-dev
+
+      - name: Configure CMake (Debug Features)
+        run: |
+          cmake -B build \
+            -DCELL_BUILD_TESTS=ON \
+            -DCELL_DEBUG_GUARDS=ON \
+            -DCELL_DEBUG_LEAKS=ON \
+            -DCELL_ENABLE_STATS=ON
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure --config Release
+
+  budget-instrumentation:
+    name: Budget & Instrumentation (Linux)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install GTest
+        run: sudo apt-get update && sudo apt-get install -y libgtest-dev
+
+      - name: Configure CMake (Budget + Instrumentation)
+        run: |
+          cmake -B build \
+            -DCELL_BUILD_TESTS=ON \
+            -DCELL_ENABLE_BUDGET=ON \
+            -DCELL_ENABLE_INSTRUMENTATION=ON \
+            -DCELL_ENABLE_STATS=ON
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure --config Release
