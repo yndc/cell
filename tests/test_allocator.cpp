@@ -107,7 +107,7 @@ TEST(MultiThreadedCell) {
     std::atomic<int> success_count{0};
 
     for (int t = 0; t < num_threads; ++t) {
-        threads.emplace_back([&ctx, &success_count, t]() {
+        threads.emplace_back([&ctx, &success_count, t, allocs_per_thread]() {
             std::vector<Cell::CellData *> local_cells;
             for (int i = 0; i < allocs_per_thread; ++i) {
                 Cell::CellData *cell = ctx.alloc_cell(static_cast<uint8_t>(t));

@@ -159,7 +159,7 @@ TEST(HighConcurrencySubCell) {
 
     std::vector<std::thread> threads;
     for (int t = 0; t < num_threads; ++t) {
-        threads.emplace_back([&ctx, &success_count, &failure_count, t]() {
+        threads.emplace_back([&ctx, &success_count, &failure_count, t, ops_per_thread]() {
             std::mt19937 rng(t * 12345);
             std::uniform_int_distribution<size_t> size_dist(16, 4096);
 
@@ -196,7 +196,7 @@ TEST(ConcurrentMixedTiers) {
 
     std::vector<std::thread> threads;
     for (int t = 0; t < num_threads; ++t) {
-        threads.emplace_back([&ctx, &total_ops, t]() {
+        threads.emplace_back([&ctx, &total_ops, t, rounds]() {
             std::vector<std::pair<void *, size_t>> allocs;
 
             for (int r = 0; r < rounds; ++r) {

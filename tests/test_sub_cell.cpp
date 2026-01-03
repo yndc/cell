@@ -232,7 +232,7 @@ TEST(MultiThreadedSubCell) {
     std::atomic<int> success_count{0};
 
     for (int t = 0; t < num_threads; ++t) {
-        threads.emplace_back([&ctx, &success_count, t]() {
+        threads.emplace_back([&ctx, &success_count, t, allocs_per_thread]() {
             std::vector<void *> local_ptrs;
             for (int i = 0; i < allocs_per_thread; ++i) {
                 // Vary size classes across threads

@@ -214,7 +214,7 @@ TEST(ConcurrentFuzzing) {
 
     std::vector<std::thread> threads;
     for (int t = 0; t < num_threads; ++t) {
-        threads.emplace_back([&ctx, &success_count, &corruption_count, t]() {
+        threads.emplace_back([&ctx, &success_count, &corruption_count, t, ops_per_thread]() {
             std::mt19937_64 rng(t * 0x12345678);
             std::vector<AllocRecord> local_live;
 
@@ -399,7 +399,7 @@ TEST(TlsCacheStressFuzzing) {
 
     std::vector<std::thread> threads;
     for (int t = 0; t < num_threads; ++t) {
-        threads.emplace_back([&ctx, &total_ops, t]() {
+        threads.emplace_back([&ctx, &total_ops, t, rapid_cycles]() {
             std::mt19937_64 local_rng(t * 0xABCDEF);
 
             for (int cycle = 0; cycle < rapid_cycles; ++cycle) {
