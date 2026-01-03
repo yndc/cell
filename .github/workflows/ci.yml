@@ -24,8 +24,13 @@ jobs:
       - name: Build
         run: cmake --build build --config Release
 
-      - name: Test
+      - name: Test (Unix)
+        if: runner.os != 'Windows'
         run: ctest --test-dir build --output-on-failure
+
+      - name: Test (Windows)
+        if: runner.os == 'Windows'
+        run: ctest --test-dir build --output-on-failure -C Release
 
   debug-features:
     name: Debug Features (Linux)
