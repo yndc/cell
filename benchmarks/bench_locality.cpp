@@ -279,7 +279,11 @@ static void BM_Malloc_CacheLine_Sequential(benchmark::State &state) {
 
     std::vector<CacheLineObject *> objects(count);
     for (size_t i = 0; i < count; ++i) {
+#if defined(_WIN32)
+        objects[i] = static_cast<CacheLineObject *>(_aligned_malloc(sizeof(CacheLineObject), 64));
+#else
         objects[i] = static_cast<CacheLineObject *>(aligned_alloc(64, sizeof(CacheLineObject)));
+#endif
         new (objects[i]) CacheLineObject();
     }
 
@@ -293,7 +297,11 @@ static void BM_Malloc_CacheLine_Sequential(benchmark::State &state) {
     state.SetBytesProcessed(state.iterations() * count * sizeof(CacheLineObject));
 
     for (auto *obj : objects) {
+#if defined(_WIN32)
+        _aligned_free(obj);
+#else
         std::free(obj);
+#endif
     }
 }
 BENCHMARK(BM_Malloc_CacheLine_Sequential)->Arg(1000)->Arg(10000);
