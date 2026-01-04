@@ -15,13 +15,25 @@
 namespace Cell {
 
     Allocator::Allocator(void *base, size_t reserved_size) {
-        // Align base up to kCellSize boundary for proper cell alignment
+#if defined(_WIN32)
+        // Windows VirtualAlloc has 64KB allocation granularity, which guarantees
+        // 16KB (kCellSize) alignment. No further alignment needed.
+        m_base = base;
+        m_reserved_size = reserved_size;
+#ifndef NDEBUG
+        // Verify our assumption that VirtualAlloc returns aligned addresses
+        auto addr = reinterpret_cast<uintptr_t>(base);
+        assert((addr & (kCellSize - 1)) == 0 && "VirtualAlloc should return 16KB-aligned address");
+#endif
+#else
+        // Linux: mmap might not align to kCellSize, so align manually
         auto addr = reinterpret_cast<uintptr_t>(base);
         auto aligned_addr = (addr + kCellSize - 1) & kCellMask;
         size_t alignment_offset = aligned_addr - addr;
 
         m_base = reinterpret_cast<void *>(aligned_addr);
         m_reserved_size = reserved_size > alignment_offset ? reserved_size - alignment_offset : 0;
+#endif
 
         // Calculate number of superblocks we can fit
         m_num_superblocks = m_reserved_size / kSuperblockSize;
@@ -38,8 +50,9 @@ namespace Cell {
     }
 
     Allocator::~Allocator() {
-        // Clear TLS cache to prevent stale pointers after Context destruction
-        t_cache.count = 0;
+        // Note: We intentionally don't clear t_cache here because on Windows,
+        // thread-local destructors may run after this destructor, causing issues.
+        // The Context destructor clears the TLS bin caches which is sufficient.
     }
 
     void *Allocator::alloc() {
