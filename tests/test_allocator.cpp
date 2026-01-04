@@ -1,6 +1,8 @@
 #include "cell/context.h"
 
 #include <cassert>
+#include <cstdlib>
+#include <cstring>
 #include <cstdio>
 #include <thread>
 #include <vector>
@@ -119,6 +121,9 @@ TEST(MultiThreadedCell) {
                 ctx.free_cell(cell);
             }
             success_count += static_cast<int>(local_cells.size());
+            
+            // Flush TLS caches before thread exit to prevent accessing invalid memory
+            ctx.flush_tls_bin_caches();
         });
     }
 
@@ -228,6 +233,11 @@ TEST(MemoryDecommit) {
 }
 
 int main() {
+    // When run under CTest (or other runners), stdout is often fully buffered.
+    // Disable buffering so we see the last test name before an AV.
+    setvbuf(stdout, nullptr, _IONBF, 0);
+    setvbuf(stderr, nullptr, _IONBF, 0);
+
     printf("Cell Allocator Tests\n");
     printf("====================\n");
     printf("Configuration:\n");
@@ -237,10 +247,20 @@ int main() {
     printf("  TLS cache capacity: %zu\n", Cell::kTlsCacheCapacity);
     printf("\n");
 
+    const char *filter = std::getenv("CELL_TEST_FILTER");
+    if (filter && filter[0] != '\0') {
+        printf("Filter: %s\n\n", filter);
+    }
+
     int passed = 0;
     int failed = 0;
 
     for (const auto &test : tests) {
+        if (filter && filter[0] != '\0') {
+            if (std::strstr(test.name, filter) == nullptr) {
+                continue;
+            }
+        }
         printf("Running %s...\n", test.name);
         try {
             test.fn();

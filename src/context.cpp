@@ -1,6 +1,7 @@
 #include "cell/context.h"
 
 #include "tls_bin_cache.h"
+#include "tls_cache.h"
 
 #include <cassert>
 #include <cstdio>
@@ -170,6 +171,11 @@ namespace Cell {
         for (size_t i = 0; i < kTlsBinCacheCount; ++i) {
             t_bin_cache[i].count = 0;
         }
+        
+        // Also clear the cell-level TLS cache (don't flush, just clear)
+        // The cached cells will be freed when the memory region is unmapped
+        // Flushing would push them to the global pool which is about to be unmapped
+        t_cache.count = 0;
 
         // Buddy allocator destructor handles its cleanup
         m_buddy.reset();
@@ -1145,9 +1151,7 @@ namespace Cell {
     size_t Context::decommit_unused() {
         size_t total = 0;
 
-        // Flush TLS caches first to get accurate free counts
         if (m_allocator) {
-            m_allocator->flush_tls_cache();
             total += m_allocator->decommit_unused();
         }
 
@@ -1464,6 +1468,11 @@ namespace Cell {
                     bin.partial_head = header;
                 }
             }
+        }
+        
+        // Also flush the cell-level TLS cache
+        if (m_allocator) {
+            m_allocator->flush_tls_cache();
         }
     }
 

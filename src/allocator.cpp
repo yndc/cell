@@ -3,6 +3,7 @@
 
 #include "tls_cache.h"
 
+#include <array>
 #include <cassert>
 #include <cstring>
 
@@ -143,24 +144,80 @@ namespace Cell {
         std::lock_guard<std::mutex> lock(m_decommit_mutex);
         size_t total_freed = 0;
 
+        std::array<uint8_t, kMaxSuperblocks> decommit_mask{};
+        bool any_to_decommit = false;
+
         for (size_t i = 0; i < m_num_superblocks; ++i) {
             if (m_superblock_states[i].load(std::memory_order_relaxed) == SuperblockState::kFree) {
-                void *sb_addr = static_cast<char *>(m_base) + i * kSuperblockSize;
+                decommit_mask[i] = 1;
+                any_to_decommit = true;
+            }
+        }
+
+        if (any_to_decommit) {
+            // Cells are stored inline in superblocks. If we decommit a superblock while pointers to
+            // its cells remain in the TLS cache or global pool, the next alloc/pop will touch
+            // decommitted memory and crash. Purge any free-list entries belonging to superblocks
+            // we're about to decommit.
+
+            // Current thread TLS cache.
+            while (!t_cache.is_empty()) {
+                FreeCell *cell = t_cache.pop();
+                size_t sb_idx = get_superblock_index(cell);
+                if (sb_idx < m_num_superblocks && decommit_mask[sb_idx]) {
+                    continue; // drop
+                }
+                push_global(cell);
+            }
+
+            // Global pool.
+            FreeCell *head = m_global_head.exchange(nullptr, std::memory_order_acq_rel);
+            FreeCell *keep_head = nullptr;
+
+            while (head) {
+                FreeCell *next = head->next;
+                size_t sb_idx = get_superblock_index(head);
+                if (sb_idx < m_num_superblocks && decommit_mask[sb_idx]) {
+                    // drop
+                } else {
+                    head->next = keep_head;
+                    keep_head = head;
+                }
+                head = next;
+            }
+
+            m_global_head.store(keep_head, std::memory_order_release);
+        }
+
+        for (size_t i = 0; i < m_num_superblocks; ++i) {
+            if (!decommit_mask[i]) {
+                continue;
+            }
+
+            void *sb_addr = static_cast<char *>(m_base) + i * kSuperblockSize;
 
 #if defined(_WIN32)
-                if (VirtualFree(sb_addr, kSuperblockSize, MEM_DECOMMIT)) {
-                    m_superblock_states[i].store(SuperblockState::kDecommitted,
-                                                 std::memory_order_relaxed);
-                    total_freed += kSuperblockSize;
+            if (VirtualFree(sb_addr, kSuperblockSize, MEM_DECOMMIT)) {
+                m_superblock_states[i].store(SuperblockState::kDecommitted,
+                                             std::memory_order_relaxed);
+                total_freed += kSuperblockSize;
+            } else {
+                // Decommit failed: rebuild the free list for this fully-free superblock.
+                auto *base_ptr = static_cast<char *>(sb_addr);
+                for (size_t j = 0; j < kCellsPerSuperblock; ++j) {
+                    auto *cell = reinterpret_cast<FreeCell *>(base_ptr + j * kCellSize);
+                    push_global(cell);
                 }
-#else
-                if (madvise(sb_addr, kSuperblockSize, MADV_DONTNEED) == 0) {
-                    m_superblock_states[i].store(SuperblockState::kDecommitted,
-                                                 std::memory_order_relaxed);
-                    total_freed += kSuperblockSize;
-                }
-#endif
             }
+#else
+            if (madvise(sb_addr, kSuperblockSize, MADV_DONTNEED) == 0) {
+                m_superblock_states[i].store(SuperblockState::kDecommitted,
+                                             std::memory_order_relaxed);
+                total_freed += kSuperblockSize;
+            } else {
+                // Best-effort on Linux: keep the block committed; free list entries remain valid.
+            }
+#endif
         }
 
         return total_freed;
